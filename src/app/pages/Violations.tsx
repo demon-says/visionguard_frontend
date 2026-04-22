@@ -1,16 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router';
 import {
   Search, Filter, AlertTriangle, CheckCircle, Flag,
   Phone, Glasses, Brain, Cigarette, SlidersHorizontal,
-  Download, RefreshCw, Eye
+  Download, RefreshCw, Eye, ChevronLeft, ChevronRight
 } from 'lucide-react';
-import { violations, VIOLATION_COLORS, VIOLATION_LABELS, ViolationType } from '../data/mockData';
+import { toast } from 'sonner';
+import { VIOLATION_COLORS, VIOLATION_LABELS } from '../data/constants';
+import { useViolations, useUpdateViolation } from '../api/hooks';
 
 const violationIcons: Record<string, any> = {
   phone: Phone,
+  mobile: Phone,
   sunglasses: Glasses,
   drowsiness: Brain,
+  drowsy: Brain,
   smoking: Cigarette,
 };
 
@@ -20,37 +24,54 @@ const statusConfig = {
   flagged: { color: '#ef4444', bg: 'rgba(239,68,68,0.1)', icon: Flag, label: 'Flagged' },
 };
 
+const LoadingSkeleton = ({ height = 48 }: { height?: number }) => (
+  <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height }} />
+);
+
 export default function Violations() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [localViolations, setLocalViolations] = useState(violations);
+  const [page, setPage] = useState(1);
+  const limit = 20;
 
-  const markReviewed = (id: string) => {
-    setLocalViolations(prev => prev.map(v => v.id === id ? { ...v, status: 'reviewed' as any } : v));
+  const filters = useMemo(() => ({
+    type: filterType !== 'all' ? filterType : undefined,
+    status: filterStatus !== 'all' ? filterStatus : undefined,
+    driverName: search || undefined,
+    page,
+    limit,
+  }), [filterType, filterStatus, search, page, limit]);
+
+  const { data: result, loading, refetch } = useViolations(filters);
+  const { update: updateViolation, loading: updating } = useUpdateViolation();
+
+  const violations = result?.data || [];
+  const meta = result?.meta;
+  const totalPages = meta ? Math.ceil(meta.total / meta.limit) : 1;
+
+  const markReviewed = async (id: string) => {
+    try {
+      await updateViolation(id, { status: 'reviewed', reviewedBy: 'Admin' });
+      toast.success('Violation marked as reviewed');
+      refetch();
+    } catch {
+      toast.error('Failed to update violation');
+    }
   };
 
-  const filtered = localViolations.filter(v => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || v.driverName.toLowerCase().includes(q) || v.location.toLowerCase().includes(q) || v.route.toLowerCase().includes(q);
-    const matchType = filterType === 'all' || v.type === filterType;
-    const matchStatus = filterStatus === 'all' || v.status === filterStatus;
-    return matchSearch && matchType && matchStatus;
-  });
-
-  const pendingCount = localViolations.filter(v => v.status === 'pending').length;
-  const flaggedCount = localViolations.filter(v => v.status === 'flagged').length;
-  const reviewedCount = localViolations.filter(v => v.status === 'reviewed').length;
+  // Compute counts from current page data (approximate)
+  const totalCount = meta?.total ?? violations.length;
 
   return (
     <div className="p-6 space-y-5">
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Total Violations', value: localViolations.length, color: '#6366f1', icon: AlertTriangle },
-          { label: 'Flagged', value: flaggedCount, color: '#ef4444', icon: Flag },
-          { label: 'Pending Review', value: pendingCount, color: '#f59e0b', icon: AlertTriangle },
-          { label: 'Reviewed', value: reviewedCount, color: '#10b981', icon: CheckCircle },
+          { label: 'Total Violations', value: totalCount, color: '#6366f1', icon: AlertTriangle },
+          { label: 'Flagged', value: violations.filter(v => v.status === 'flagged').length, color: '#ef4444', icon: Flag },
+          { label: 'Pending Review', value: violations.filter(v => v.status === 'pending').length, color: '#f59e0b', icon: AlertTriangle },
+          { label: 'Reviewed', value: violations.filter(v => v.status === 'reviewed').length, color: '#10b981', icon: CheckCircle },
         ].map(item => (
           <div key={item.label} className="flex items-center gap-3 p-4 rounded-xl" style={{ background: `${item.color}0d`, border: `1px solid ${item.color}25` }}>
             <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: `${item.color}20` }}>
@@ -66,27 +87,31 @@ export default function Violations() {
 
       {/* Violation type summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {(['phone', 'sunglasses', 'drowsiness', 'smoking'] as ViolationType[]).map(type => {
-          const count = localViolations.filter(v => v.type === type).length;
-          const Icon = violationIcons[type];
-          const color = VIOLATION_COLORS[type];
-          const pct = Math.round(count / localViolations.length * 100);
+        {([
+          { key: 'mobile', label: 'Phone Usage', icon: Phone },
+          { key: 'sunglasses', label: 'Sunglasses', icon: Glasses },
+          { key: 'drowsy', label: 'Drowsiness', icon: Brain },
+          { key: 'smoking', label: 'Smoking', icon: Cigarette },
+        ]).map(({ key, label, icon: Icon }) => {
+          const count = violations.filter(v => v.violation_type === key).length;
+          const color = VIOLATION_COLORS[key];
+          const pct = violations.length ? Math.round(count / violations.length * 100) : 0;
           return (
             <div
-              key={type}
+              key={key}
               className="p-4 rounded-xl cursor-pointer transition-all hover:opacity-80"
               style={{
-                background: filterType === type ? `${color}15` : `${color}08`,
-                border: filterType === type ? `1px solid ${color}50` : `1px solid ${color}20`,
+                background: filterType === key ? `${color}15` : `${color}08`,
+                border: filterType === key ? `1px solid ${color}50` : `1px solid ${color}20`,
               }}
-              onClick={() => setFilterType(filterType === type ? 'all' : type)}
+              onClick={() => { setFilterType(filterType === key ? 'all' : key); setPage(1); }}
             >
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${color}20` }}>
                   <Icon size={16} color={color} />
                 </div>
                 <div>
-                  <div style={{ color: '#94a3b8', fontSize: 11 }}>{VIOLATION_LABELS[type]}</div>
+                  <div style={{ color: '#94a3b8', fontSize: 11 }}>{label}</div>
                   <div style={{ color: '#f1f5f9', fontSize: 18, fontWeight: 700 }}>{count}</div>
                 </div>
               </div>
@@ -110,9 +135,9 @@ export default function Violations() {
             <Search size={15} color="#475569" />
             <input
               type="text"
-              placeholder="Search driver, location, route..."
+              placeholder="Search driver name..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
               className="bg-transparent outline-none flex-1 text-sm"
               style={{ color: '#f1f5f9' }}
             />
@@ -124,7 +149,7 @@ export default function Violations() {
               return (
                 <button
                   key={s}
-                  onClick={() => setFilterStatus(s)}
+                  onClick={() => { setFilterStatus(s); setPage(1); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                   style={{
                     background: filterStatus === s ? (config ? `${config.color}20` : 'rgba(99,102,241,0.2)') : 'rgba(255,255,255,0.04)',
@@ -133,18 +158,13 @@ export default function Violations() {
                   }}
                 >
                   {s.charAt(0).toUpperCase() + s.slice(1)}
-                  {s !== 'all' && (
-                    <span className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.1)', fontSize: 10 }}>
-                      {localViolations.filter(v => v.status === s).length}
-                    </span>
-                  )}
                 </button>
               );
             })}
           </div>
 
           <div style={{ color: '#475569', fontSize: 12 }}>
-            Showing {filtered.length} of {localViolations.length}
+            Showing {violations.length} of {totalCount}
           </div>
         </div>
 
@@ -153,7 +173,7 @@ export default function Violations() {
           <table className="w-full">
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                {['Type', 'Driver', 'Location & Route', 'Timestamp', 'Confidence', 'Status', 'Actions'].map(h => (
+                {['Type', 'Driver', 'Route', 'Date & Time', 'Confidence', 'Status', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3" style={{ color: '#475569', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -161,10 +181,14 @@ export default function Violations() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((v, i) => {
-                const Icon = violationIcons[v.type];
-                const color = VIOLATION_COLORS[v.type];
-                const sc = statusConfig[v.status as keyof typeof statusConfig];
+              {loading ? (
+                Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i}><td colSpan={7} className="px-4 py-3"><LoadingSkeleton height={48} /></td></tr>
+                ))
+              ) : violations.map((v, i) => {
+                const Icon = violationIcons[v.violation_type] || AlertTriangle;
+                const color = VIOLATION_COLORS[v.violation_type] || '#6366f1';
+                const sc = statusConfig[v.status as keyof typeof statusConfig] || statusConfig.pending;
                 const StatusIcon = sc.icon;
                 return (
                   <tr
@@ -179,7 +203,7 @@ export default function Violations() {
                           <Icon size={14} color={color} />
                         </div>
                         <span style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                          {VIOLATION_LABELS[v.type]}
+                          {VIOLATION_LABELS[v.violation_type] || v.violation_label}
                         </span>
                       </div>
                     </td>
@@ -187,27 +211,27 @@ export default function Violations() {
                     {/* Driver */}
                     <td className="px-4 py-3">
                       <Link
-                        to={`/drivers/${v.driverId}`}
+                        to={`/drivers/${v.driver_id}`}
                         className="font-semibold hover:opacity-80 transition-opacity"
                         style={{ color: '#a5b4fc', fontSize: 13 }}
                       >
-                        {v.driverName}
+                        {v.driver_name}
                       </Link>
                     </td>
 
-                    {/* Location */}
+                    {/* Route */}
                     <td className="px-4 py-3">
-                      <div style={{ color: '#94a3b8', fontSize: 12 }}>{v.location.split(',')[0]}</div>
-                      <div style={{ color: '#475569', fontSize: 11 }}>{v.route}</div>
+                      <div style={{ color: '#94a3b8', fontSize: 12 }}>{v.route_name || '–'}</div>
+                      {v.bus_number && <div style={{ color: '#475569', fontSize: 11 }}>Bus: {v.bus_number}</div>}
                     </td>
 
-                    {/* Timestamp */}
+                    {/* Date & Time */}
                     <td className="px-4 py-3">
                       <div style={{ color: '#94a3b8', fontSize: 12, whiteSpace: 'nowrap' }}>
-                        {new Date(v.timestamp).toLocaleDateString()}
+                        {v.detection_date ? new Date(v.detection_date).toLocaleDateString() : '–'}
                       </div>
                       <div style={{ color: '#475569', fontSize: 11 }}>
-                        {new Date(v.timestamp).toLocaleTimeString()}
+                        {v.start_time || '–'}
                       </div>
                     </td>
 
@@ -218,12 +242,12 @@ export default function Violations() {
                           <div
                             className="h-full rounded-full"
                             style={{
-                              width: `${v.confidence}%`,
-                              background: v.confidence >= 90 ? '#10b981' : v.confidence >= 80 ? '#f59e0b' : '#ef4444',
+                              width: `${v.confidence || 0}%`,
+                              background: (v.confidence || 0) >= 90 ? '#10b981' : (v.confidence || 0) >= 80 ? '#f59e0b' : '#ef4444',
                             }}
                           />
                         </div>
-                        <span style={{ color: '#94a3b8', fontSize: 12 }}>{v.confidence}%</span>
+                        <span style={{ color: '#94a3b8', fontSize: 12 }}>{v.confidence || '–'}%</span>
                       </div>
                     </td>
 
@@ -239,7 +263,7 @@ export default function Violations() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <Link
-                          to={`/drivers/${v.driverId}`}
+                          to={`/drivers/${v.driver_id}`}
                           className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80"
                           style={{ background: 'rgba(99,102,241,0.1)', color: '#a5b4fc' }}
                           title="View Driver"
@@ -249,7 +273,8 @@ export default function Violations() {
                         {v.status !== 'reviewed' && (
                           <button
                             onClick={() => markReviewed(v.id)}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80"
+                            disabled={updating}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80 disabled:opacity-40"
                             style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}
                             title="Mark Reviewed"
                           >
@@ -265,10 +290,56 @@ export default function Violations() {
           </table>
         </div>
 
-        {filtered.length === 0 && (
+        {!loading && violations.length === 0 && (
           <div className="text-center py-12">
             <CheckCircle size={32} color="#10b981" className="mx-auto mb-3" />
             <div style={{ color: '#10b981', fontWeight: 600 }}>No violations match your filters.</div>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {meta && totalPages > 1 && (
+          <div
+            className="flex items-center justify-between px-4 py-3"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+          >
+            <div style={{ color: '#475569', fontSize: 12 }}>
+              Showing {((page - 1) * limit) + 1}–{Math.min(page * limit, meta.total)} of {meta.total}
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-2 py-1 rounded-lg text-xs transition-all hover:opacity-80 disabled:opacity-30"
+                style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                const p = i + 1;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: page === p ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
+                      color: page === p ? '#a5b4fc' : '#64748b',
+                    }}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-2 py-1 rounded-lg text-xs transition-all hover:opacity-80 disabled:opacity-30"
+                style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         )}
       </div>

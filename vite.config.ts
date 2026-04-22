@@ -31,6 +31,21 @@ export default defineConfig({
     },
   },
 
+  // Dev server proxy — forwards /api requests to the Express backend
+  // so we avoid CORS issues during development.
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
+  },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })

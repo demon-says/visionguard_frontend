@@ -13,6 +13,7 @@ import {
   Menu,
   Eye,
 } from 'lucide-react';
+import { useDashboardSummaryPolled, useAiStatus } from '../api/hooks';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
@@ -30,6 +31,16 @@ export function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+
+  // Live stats from the backend (polled every 30s)
+  const { data: summaryRes } = useDashboardSummaryPolled();
+  const { data: aiStatusRes } = useAiStatus();
+
+  const summary = summaryRes?.data;
+  const aiStatus = aiStatusRes?.data;
+
+  const activeDrivers = summary?.active_drivers ?? '–';
+  const pendingAlerts = (summary?.pending_violations ?? 0) + (summary?.flagged_violations ?? 0);
 
   const getPageTitle = () => {
     const path = location.pathname;
@@ -108,12 +119,12 @@ export function Layout() {
               {!collapsed && (
                 <span style={{ fontSize: 14, fontWeight: 500 }}>{label}</span>
               )}
-              {!collapsed && label === 'Violations' && (
+              {!collapsed && label === 'Violations' && pendingAlerts > 0 && (
                 <span
                   className="ml-auto text-xs px-1.5 py-0.5 rounded-full"
                   style={{ background: '#ef4444', color: '#fff', fontSize: 11 }}
                 >
-                  3
+                  {pendingAlerts}
                 </span>
               )}
               {collapsed && (
@@ -156,14 +167,31 @@ export function Layout() {
           </button>
         </div>
 
-        {/* AI Status */}
+        {/* AI Status — live from backend */}
         {!collapsed && (
-          <div className="mx-3 mb-4 p-3 rounded-xl" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)' }}>
+          <div
+            className="mx-3 mb-4 p-3 rounded-xl"
+            style={{
+              background: aiStatus?.isRunning ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+              border: `1px solid ${aiStatus?.isRunning ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)'}`,
+            }}
+          >
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#10b981' }} />
-              <span style={{ color: '#10b981', fontSize: 12, fontWeight: 600 }}>AI Engine Active</span>
+              <div
+                className={`w-2 h-2 rounded-full ${aiStatus?.isRunning ? 'animate-pulse' : ''}`}
+                style={{ background: aiStatus?.isRunning ? '#10b981' : '#ef4444' }}
+              />
+              <span
+                style={{ color: aiStatus?.isRunning ? '#10b981' : '#ef4444', fontSize: 12, fontWeight: 600 }}
+              >
+                {aiStatus?.isRunning ? 'AI Engine Active' : 'AI Engine Stopped'}
+              </span>
             </div>
-            <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>6 feeds • Real-time detection</div>
+            <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+              {aiStatus?.isRunning
+                ? `${aiStatus.fetchCount} cycles • ${aiStatus.totalInserted} violations`
+                : aiStatus?.lastError || 'Poller not running'}
+            </div>
           </div>
         )}
       </aside>
@@ -193,22 +221,26 @@ export function Layout() {
             </p>
           </div>
 
-          {/* Quick stats */}
+          {/* Quick stats — live from backend */}
           <div className="hidden md:flex items-center gap-4">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
               <div className="w-2 h-2 rounded-full" style={{ background: '#10b981' }} />
-              <span style={{ color: '#10b981', fontSize: 12, fontWeight: 600 }}>8 Active Drivers</span>
+              <span style={{ color: '#10b981', fontSize: 12, fontWeight: 600 }}>{activeDrivers} Active Drivers</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-              <AlertTriangle size={13} color="#ef4444" />
-              <span style={{ color: '#ef4444', fontSize: 12, fontWeight: 600 }}>3 Pending Alerts</span>
-            </div>
+            {pendingAlerts > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                <AlertTriangle size={13} color="#ef4444" />
+                <span style={{ color: '#ef4444', fontSize: 12, fontWeight: 600 }}>{pendingAlerts} Pending Alerts</span>
+              </div>
+            )}
           </div>
 
           {/* Notification bell */}
           <button className="relative p-2 rounded-xl transition-all hover:opacity-80" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
             <Bell size={18} color="#a5b4fc" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#ef4444' }} />
+            {pendingAlerts > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#ef4444' }} />
+            )}
           </button>
 
           {/* User avatar */}

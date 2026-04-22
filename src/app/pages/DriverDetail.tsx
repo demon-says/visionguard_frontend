@@ -2,16 +2,14 @@ import React from 'react';
 import { useParams, Link } from 'react-router';
 import {
   ArrowLeft, Shield, AlertTriangle, Phone, Glasses, Brain,
-  Cigarette, Map, Calendar, Hash, Clock, TrendingUp, Award
+  Cigarette, Map, Calendar, Hash, Clock, TrendingUp, Award, Loader2
 } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell
 } from 'recharts';
-import {
-  drivers, violations, routes,
-  VIOLATION_COLORS, VIOLATION_LABELS, ROUTE_COLORS, ROUTE_LABELS
-} from '../data/mockData';
+import { VIOLATION_COLORS, VIOLATION_LABELS, ROUTE_COLORS, ROUTE_LABELS } from '../data/constants';
+import { useDriver } from '../api/hooks';
 
 const safetyColor = (score: number) => {
   if (score >= 80) return '#10b981';
@@ -22,51 +20,71 @@ const safetyColor = (score: number) => {
 
 const violationIcons: Record<string, any> = {
   phone: Phone,
+  mobile: Phone,
   sunglasses: Glasses,
   drowsiness: Brain,
+  drowsy: Brain,
   smoking: Cigarette,
 };
 
+const LoadingSkeleton = ({ height = 200 }: { height?: number }) => (
+  <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height }} />
+);
+
 export default function DriverDetail() {
   const { id } = useParams<{ id: string }>();
-  const driver = drivers.find(d => d.id === id);
+  const { data: result, loading, error } = useDriver(id);
 
-  if (!driver) {
+  if (loading) {
+    return (
+      <div className="p-6 space-y-5">
+        <LoadingSkeleton height={40} />
+        <LoadingSkeleton height={200} />
+        <div className="grid lg:grid-cols-3 gap-5">
+          <LoadingSkeleton height={300} />
+          <LoadingSkeleton height={300} />
+          <LoadingSkeleton height={300} />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !result?.data) {
     return (
       <div className="p-6 text-center">
-        <div style={{ color: '#f1f5f9', fontSize: 18 }}>Driver not found.</div>
+        <div style={{ color: '#f1f5f9', fontSize: 18 }}>{error || 'Driver not found.'}</div>
         <Link to="/drivers" className="text-indigo-400 underline mt-2 inline-block">Back to Drivers</Link>
       </div>
     );
   }
 
-  const route = routes.find(r => r.id === driver.assignedRouteId);
-  const driverViolations = violations.filter(v => v.driverId === driver.id);
-  const scoreColor = safetyColor(driver.safetyScore);
-  const routeColor = ROUTE_COLORS[driver.routeType];
+  const driver = result.data;
+  const driverViolations = driver.recentViolations || [];
+  const scoreColor = safetyColor(driver.safety_score);
+  const routeColor = ROUTE_COLORS[driver.route_type as keyof typeof ROUTE_COLORS] || '#6b7280';
 
   const statusStyles: Record<string, { bg: string; color: string }> = {
     active: { bg: 'rgba(16,185,129,0.1)', color: '#10b981' },
     inactive: { bg: 'rgba(245,158,11,0.1)', color: '#f59e0b' },
     suspended: { bg: 'rgba(239,68,68,0.1)', color: '#ef4444' },
   };
-  const statusStyle = statusStyles[driver.status];
+  const statusStyle = statusStyles[driver.status] || statusStyles.active;
 
   // Radar data for skills
   const radarData = [
-    { subject: 'Punctuality', A: 90 - driver.totalViolations * 2 },
-    { subject: 'Focus', A: driver.safetyScore },
-    { subject: 'Safety', A: driver.safetyScore - 5 },
-    { subject: 'Compliance', A: Math.max(20, 100 - driver.totalViolations * 8) },
-    { subject: 'Experience', A: Math.min(100, driver.experience * 8) },
+    { subject: 'Punctuality', A: 90 - driver.total_violations * 2 },
+    { subject: 'Focus', A: driver.safety_score },
+    { subject: 'Safety', A: driver.safety_score - 5 },
+    { subject: 'Compliance', A: Math.max(20, 100 - driver.total_violations * 8) },
+    { subject: 'Experience', A: Math.min(100, (driver.experience_years || 1) * 8) },
   ];
 
   // Violation history bar data
   const violationBarData = [
-    { name: 'Phone', value: driver.violations.phone, color: VIOLATION_COLORS.phone },
-    { name: 'Sunglasses', value: driver.violations.sunglasses, color: VIOLATION_COLORS.sunglasses },
-    { name: 'Drowsiness', value: driver.violations.drowsiness, color: VIOLATION_COLORS.drowsiness },
-    { name: 'Smoking', value: driver.violations.smoking, color: VIOLATION_COLORS.smoking },
+    { name: 'Phone', value: driver.phone_violations, color: VIOLATION_COLORS.phone },
+    { name: 'Sunglasses', value: driver.sunglasses_violations, color: VIOLATION_COLORS.sunglasses },
+    { name: 'Drowsiness', value: driver.drowsiness_violations, color: VIOLATION_COLORS.drowsiness },
+    { name: 'Smoking', value: driver.smoking_violations, color: VIOLATION_COLORS.smoking },
   ];
 
   return (
@@ -93,7 +111,7 @@ export default function DriverDetail() {
           <div className="relative">
             <div
               className="w-24 h-24 rounded-2xl flex items-center justify-center text-3xl font-bold"
-              style={{ background: `linear-gradient(135deg, ${driver.avatarColor}40, ${driver.avatarColor}20)`, color: driver.avatarColor, border: `2px solid ${driver.avatarColor}40` }}
+              style={{ background: `linear-gradient(135deg, ${driver.avatar_color}40, ${driver.avatar_color}20)`, color: driver.avatar_color, border: `2px solid ${driver.avatar_color}40` }}
             >
               {driver.initials}
             </div>
@@ -120,19 +138,19 @@ export default function DriverDetail() {
                 className="px-3 py-1 rounded-full text-xs font-bold"
                 style={{ background: `${routeColor}15`, color: routeColor }}
               >
-                {ROUTE_LABELS[driver.routeType]} Route
+                {ROUTE_LABELS[driver.route_type as keyof typeof ROUTE_LABELS] || driver.route_type} Route
               </span>
             </div>
             <div style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
-              {driver.licenseNumber} • Age {driver.age} • {driver.experience} years experience
+              {driver.license_number} • {driver.experience_years || 0} years experience
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: 'Safety Score', value: `${driver.safetyScore}%`, color: scoreColor },
-                { label: 'Global Rank', value: `#${driver.rank} / ${drivers.length}`, color: '#6366f1' },
-                { label: 'Total Violations', value: driver.totalViolations, color: '#f97316' },
-                { label: 'Member Since', value: new Date(driver.joinDate).getFullYear(), color: '#06b6d4' },
+                { label: 'Safety Score', value: `${driver.safety_score}%`, color: scoreColor },
+                { label: 'Global Rank', value: `#${driver.rank}`, color: '#6366f1' },
+                { label: 'Total Violations', value: driver.total_violations, color: '#f97316' },
+                { label: 'Member Since', value: driver.join_date ? new Date(driver.join_date).getFullYear() : '–', color: '#06b6d4' },
               ].map(item => (
                 <div key={item.label} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
                   <div style={{ color: '#475569', fontSize: 11 }}>{item.label}</div>
@@ -153,14 +171,14 @@ export default function DriverDetail() {
                   stroke={scoreColor}
                   strokeWidth="8"
                   strokeLinecap="round"
-                  strokeDasharray={`${2 * Math.PI * 36 * driver.safetyScore / 100} ${2 * Math.PI * 36}`}
+                  strokeDasharray={`${2 * Math.PI * 36 * driver.safety_score / 100} ${2 * Math.PI * 36}`}
                   transform="rotate(-90 45 45)"
                   style={{ transition: 'stroke-dasharray 1s ease' }}
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <Shield size={14} color={scoreColor} />
-                <div style={{ color: scoreColor, fontWeight: 800, fontSize: 16 }}>{driver.safetyScore}</div>
+                <div style={{ color: scoreColor, fontWeight: 800, fontSize: 16 }}>{driver.safety_score}</div>
               </div>
             </div>
             <div style={{ color: '#64748b', fontSize: 11 }}>Safety Score</div>
@@ -182,7 +200,7 @@ export default function DriverDetail() {
               <RadarChart data={radarData}>
                 <PolarGrid stroke="rgba(255,255,255,0.1)" />
                 <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 11 }} />
-                <Radar name="Score" dataKey="A" stroke={driver.avatarColor} fill={driver.avatarColor} fillOpacity={0.15} strokeWidth={2} />
+                <Radar name="Score" dataKey="A" stroke={driver.avatar_color} fill={driver.avatar_color} fillOpacity={0.15} strokeWidth={2} />
               </RadarChart>
             </ResponsiveContainer>
           </div>
@@ -220,27 +238,12 @@ export default function DriverDetail() {
               <Map size={16} color={routeColor} />
               <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14 }}>Assigned Route</div>
               <span className="ml-auto px-2 py-0.5 rounded text-xs font-semibold" style={{ background: `${routeColor}15`, color: routeColor }}>
-                {ROUTE_LABELS[driver.routeType]}
+                {ROUTE_LABELS[driver.route_type as keyof typeof ROUTE_LABELS] || driver.route_type}
               </span>
             </div>
-            {route && (
-              <>
-                <div style={{ color: '#a5b4fc', fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{route.name}</div>
-                <div style={{ color: '#64748b', fontSize: 12, marginBottom: 12 }}>{route.description}</div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { label: 'Distance', value: `${route.distance} km` },
-                    { label: 'Daily Trips', value: route.dailyTrips },
-                    { label: 'Stops', value: route.stops },
-                    { label: 'Travel Time', value: `~${route.avgTravelTime} min` },
-                  ].map(item => (
-                    <div key={item.label} className="p-2.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                      <div style={{ color: '#475569', fontSize: 11 }}>{item.label}</div>
-                      <div style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 14 }}>{item.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </>
+            <div style={{ color: '#a5b4fc', fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{driver.route_name || 'No route assigned'}</div>
+            {driver.bus_number && (
+              <div style={{ color: '#64748b', fontSize: 12, marginBottom: 12 }}>Bus: {driver.bus_number}</div>
             )}
           </div>
 
@@ -252,10 +255,10 @@ export default function DriverDetail() {
             <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Driver Details</div>
             <div className="space-y-3">
               {[
-                { icon: Hash, label: 'License Number', value: driver.licenseNumber },
-                { icon: Calendar, label: 'Join Date', value: new Date(driver.joinDate).toLocaleDateString() },
-                { icon: Clock, label: 'Last Active', value: new Date(driver.lastActive).toLocaleString() },
-                { icon: TrendingUp, label: 'Experience', value: `${driver.experience} years` },
+                { icon: Hash, label: 'License Number', value: driver.license_number },
+                { icon: Calendar, label: 'Join Date', value: driver.join_date ? new Date(driver.join_date).toLocaleDateString() : '–' },
+                { icon: Clock, label: 'Last Active', value: driver.last_active ? new Date(driver.last_active).toLocaleString() : '–' },
+                { icon: TrendingUp, label: 'Experience', value: `${driver.experience_years || 0} years` },
                 { icon: Award, label: 'Ranking', value: `#${driver.rank} globally` },
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} className="flex items-center gap-3">
@@ -296,8 +299,8 @@ export default function DriverDetail() {
           ) : (
             <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
               {driverViolations.map(v => {
-                const Icon = violationIcons[v.type];
-                const color = VIOLATION_COLORS[v.type];
+                const Icon = violationIcons[v.violation_type] || AlertTriangle;
+                const color = VIOLATION_COLORS[v.violation_type] || '#6366f1';
                 const statusColors: Record<string, string> = {
                   pending: '#f59e0b', reviewed: '#10b981', flagged: '#ef4444',
                 };
@@ -313,20 +316,24 @@ export default function DriverDetail() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <div style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>{VIOLATION_LABELS[v.type]}</div>
+                          <div style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>
+                            {VIOLATION_LABELS[v.violation_type] || v.violation_label}
+                          </div>
                           <span
                             className="px-1.5 py-0.5 rounded text-xs"
-                            style={{ background: `${statusColors[v.status]}15`, color: statusColors[v.status] }}
+                            style={{ background: `${statusColors[v.status] || '#6366f1'}15`, color: statusColors[v.status] || '#6366f1' }}
                           >
                             {v.status}
                           </span>
                         </div>
-                        <div style={{ color: '#64748b', fontSize: 11 }}>{v.location}</div>
+                        <div style={{ color: '#64748b', fontSize: 11 }}>{v.detection_date} at {v.start_time}</div>
                         <div className="flex items-center justify-between mt-1">
                           <div style={{ color: '#475569', fontSize: 11 }}>
-                            {new Date(v.timestamp).toLocaleString()}
+                            {v.detection_date ? new Date(v.detection_date).toLocaleDateString() : ''}
                           </div>
-                          <div style={{ color: color, fontSize: 11, fontWeight: 600 }}>{v.confidence}% conf.</div>
+                          {v.confidence && (
+                            <div style={{ color: color, fontSize: 11, fontWeight: 600 }}>{v.confidence}% conf.</div>
+                          )}
                         </div>
                       </div>
                     </div>

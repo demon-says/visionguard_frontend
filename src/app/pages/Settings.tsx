@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon, Bell, Shield, Brain, Camera,
-  Sliders, Save, RefreshCw, ChevronRight, ToggleLeft, ToggleRight, Info
+  Sliders, Save, RefreshCw, ChevronRight, Info, Loader2
 } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  useAllSettings, useUpdateDetectionSettings,
+  useUpdateRouteThresholds, useUpdateNotifications, useUpdateCamera,
+} from '../api/hooks';
+import type { DetectionSetting, RouteThreshold, NotificationSettings, CameraSettings, SystemInfo } from '../api/types';
 
 const Toggle = ({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) => (
   <button onClick={onToggle} className="relative w-11 h-6 rounded-full transition-all" style={{ background: enabled ? '#6366f1' : 'rgba(255,255,255,0.1)' }}>
@@ -10,31 +16,117 @@ const Toggle = ({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
   </button>
 );
 
-export default function Settings() {
-  const [detections, setDetections] = useState({
-    phone: true,
-    sunglasses: true,
-    drowsiness: true,
-    smoking: true,
-  });
-  const [thresholds, setThresholds] = useState({
-    phone: 75,
-    sunglasses: 70,
-    drowsiness: 80,
-    smoking: 75,
-  });
-  const [notifications, setNotifications] = useState({
-    alertSound: true,
-    emailAlerts: false,
-    smsAlerts: false,
-    autoFlag: true,
-  });
-  const [saved, setSaved] = useState(false);
+const LoadingSkeleton = ({ height = 200 }: { height?: number }) => (
+  <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height }} />
+);
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+const moduleColors: Record<string, string> = {
+  phone: '#f97316',
+  mobile: '#f97316',
+  sunglasses: '#eab308',
+  drowsiness: '#ef4444',
+  drowsy: '#ef4444',
+  smoking: '#a855f7',
+};
+
+const moduleLabels: Record<string, string> = {
+  phone: 'Mobile Phone Detection',
+  mobile: 'Mobile Phone Detection',
+  sunglasses: 'Sunglasses Detection',
+  drowsiness: 'Drowsiness Detection',
+  drowsy: 'Drowsiness Detection',
+  smoking: 'Smoking Detection',
+};
+
+const moduleDescs: Record<string, string> = {
+  phone: 'Detects driver using phone while driving',
+  mobile: 'Detects driver using phone while driving',
+  sunglasses: 'Detects driver wearing unauthorized sunglasses',
+  drowsiness: 'Analyzes eye closure and head position for drowsiness',
+  drowsy: 'Analyzes eye closure and head position for drowsiness',
+  smoking: 'Detects smoking behavior during driving',
+};
+
+const routeTypeColors: Record<string, string> = {
+  demanding: '#10b981',
+  moderate: '#3b82f6',
+  simple: '#6b7280',
+};
+
+export default function Settings() {
+  // Load all settings from API
+  const { data: settingsRes, loading, error, refetch } = useAllSettings();
+  const { update: saveDetection, loading: savingDetection } = useUpdateDetectionSettings();
+  const { update: saveThresholds, loading: savingThresholds } = useUpdateRouteThresholds();
+  const { update: saveNotifications, loading: savingNotifications } = useUpdateNotifications();
+  const { update: saveCamera, loading: savingCamera } = useUpdateCamera();
+
+  const saving = savingDetection || savingThresholds || savingNotifications || savingCamera;
+
+  // Local state initialized from API
+  const [detections, setDetections] = useState<DetectionSetting[]>([]);
+  const [thresholds, setThresholds] = useState<RouteThreshold[]>([]);
+  const [notifications, setNotifications] = useState<NotificationSettings>({
+    alert_sound: true, email_alerts: false, sms_alerts: false, auto_flag: true, auto_suspend_threshold: 5,
+  });
+  const [camera, setCamera] = useState<CameraSettings>({
+    resolution: '1080p', frame_rate: 30, retention_days: 30, capture_on_detection: true,
+  });
+  const [system, setSystem] = useState<SystemInfo | null>(null);
+
+  // Populate state from API
+  useEffect(() => {
+    if (settingsRes?.data) {
+      const d = settingsRes.data;
+      if (d.detection?.length) setDetections(d.detection);
+      if (d.thresholds?.length) setThresholds(d.thresholds);
+      if (d.notifications) setNotifications(d.notifications);
+      if (d.camera) setCamera(d.camera);
+      if (d.system) setSystem(d.system);
+    }
+  }, [settingsRes]);
+
+  const handleSave = async () => {
+    try {
+      await Promise.all([
+        saveDetection(detections),
+        saveThresholds(thresholds),
+        saveNotifications(notifications),
+        saveCamera(camera),
+      ]);
+      toast.success('Settings saved successfully');
+      refetch();
+    } catch (err) {
+      toast.error('Failed to save some settings. Please try again.');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-5 max-w-4xl">
+        <LoadingSkeleton height={60} />
+        <LoadingSkeleton height={300} />
+        <LoadingSkeleton height={200} />
+        <LoadingSkeleton height={200} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 text-center">
+        <div style={{ color: '#ef4444', fontWeight: 600 }}>Failed to load settings</div>
+        <div style={{ color: '#475569', fontSize: 13, marginTop: 4 }}>{error}</div>
+        <button
+          onClick={refetch}
+          className="mt-4 px-4 py-2 rounded-xl text-sm font-semibold"
+          style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc' }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-5 max-w-4xl">
@@ -45,10 +137,11 @@ export default function Settings() {
         </div>
         <button
           onClick={handleSave}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
-          style={{ background: saved ? 'rgba(16,185,129,0.2)' : 'rgba(99,102,241,0.2)', color: saved ? '#10b981' : '#a5b4fc', border: `1px solid ${saved ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)'}` }}
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-80 disabled:opacity-50"
+          style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
         >
-          {saved ? <><RefreshCw size={14} /> Saved!</> : <><Save size={14} /> Save Settings</>}
+          {saving ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <><Save size={14} /> Save Settings</>}
         </button>
       </div>
 
@@ -59,44 +152,50 @@ export default function Settings() {
           <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>AI Detection Modules</div>
         </div>
         <div className="space-y-4">
-          {[
-            { key: 'phone', label: 'Mobile Phone Detection', desc: 'Detects driver using phone while driving', color: '#f97316' },
-            { key: 'sunglasses', label: 'Sunglasses Detection', desc: 'Detects driver wearing unauthorized sunglasses', color: '#eab308' },
-            { key: 'drowsiness', label: 'Drowsiness Detection', desc: 'Analyzes eye closure and head position for drowsiness', color: '#ef4444' },
-            { key: 'smoking', label: 'Smoking Detection', desc: 'Detects smoking behavior during driving', color: '#a855f7' },
-          ].map(item => (
-            <div key={item.key}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 rounded-full" style={{ background: item.color }} />
-                  <div>
-                    <div style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 600 }}>{item.label}</div>
-                    <div style={{ color: '#475569', fontSize: 12 }}>{item.desc}</div>
+          {detections.map((mod, idx) => {
+            const color = moduleColors[mod.module_name] || '#6366f1';
+            return (
+              <div key={mod.module_name}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full" style={{ background: color }} />
+                    <div>
+                      <div style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 600 }}>{moduleLabels[mod.module_name] || mod.module_name}</div>
+                      <div style={{ color: '#475569', fontSize: 12 }}>{moduleDescs[mod.module_name] || ''}</div>
+                    </div>
+                  </div>
+                  <Toggle
+                    enabled={mod.is_enabled}
+                    onToggle={() => {
+                      const next = [...detections];
+                      next[idx] = { ...next[idx], is_enabled: !next[idx].is_enabled };
+                      setDetections(next);
+                    }}
+                  />
+                </div>
+                <div className="flex items-center gap-3 ml-6 mt-2">
+                  <span style={{ color: '#64748b', fontSize: 12, minWidth: 100 }}>Confidence: {mod.confidence_threshold}%</span>
+                  <input
+                    type="range"
+                    min="50"
+                    max="99"
+                    value={mod.confidence_threshold}
+                    onChange={e => {
+                      const next = [...detections];
+                      next[idx] = { ...next[idx], confidence_threshold: Number(e.target.value) };
+                      setDetections(next);
+                    }}
+                    className="flex-1 accent-indigo-500"
+                    style={{ maxWidth: 200 }}
+                    disabled={!mod.is_enabled}
+                  />
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)', width: 100 }}>
+                    <div className="h-full rounded-full" style={{ width: `${mod.confidence_threshold}%`, background: color }} />
                   </div>
                 </div>
-                <Toggle
-                  enabled={detections[item.key as keyof typeof detections]}
-                  onToggle={() => setDetections(d => ({ ...d, [item.key]: !d[item.key as keyof typeof d] }))}
-                />
               </div>
-              <div className="flex items-center gap-3 ml-6 mt-2">
-                <span style={{ color: '#64748b', fontSize: 12, minWidth: 100 }}>Confidence Threshold: {thresholds[item.key as keyof typeof thresholds]}%</span>
-                <input
-                  type="range"
-                  min="50"
-                  max="99"
-                  value={thresholds[item.key as keyof typeof thresholds]}
-                  onChange={e => setThresholds(t => ({ ...t, [item.key]: Number(e.target.value) }))}
-                  className="flex-1 accent-indigo-500"
-                  style={{ maxWidth: 200 }}
-                  disabled={!detections[item.key as keyof typeof detections]}
-                />
-                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)', width: 100 }}>
-                  <div className="h-full rounded-full" style={{ width: `${thresholds[item.key as keyof typeof thresholds]}%`, background: item.color }} />
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -107,20 +206,36 @@ export default function Settings() {
           <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>Route Assignment Thresholds</div>
         </div>
         <div className="grid md:grid-cols-3 gap-4">
-          {[
-            { label: 'Demanding Route', desc: 'Min score required', value: 80, color: '#10b981' },
-            { label: 'Moderate Route', desc: 'Min score required', value: 50, color: '#3b82f6' },
-            { label: 'Simple Route', desc: 'Assigned below', value: 50, color: '#6b7280' },
-          ].map(item => (
-            <div key={item.label} className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />
-                <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{item.label}</div>
+          {thresholds.map((t, idx) => {
+            const color = routeTypeColors[t.route_type] || '#6b7280';
+            return (
+              <div key={t.route_type} className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+                  <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>
+                    {t.route_type.charAt(0).toUpperCase() + t.route_type.slice(1)} Route
+                  </div>
+                </div>
+                <div style={{ color: '#475569', fontSize: 12 }}>Min safety score required</div>
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={t.min_safety_score}
+                    onChange={e => {
+                      const next = [...thresholds];
+                      next[idx] = { ...next[idx], min_safety_score: Number(e.target.value) };
+                      setThresholds(next);
+                    }}
+                    className="w-20 px-3 py-2 rounded-lg text-center font-bold text-lg bg-transparent outline-none"
+                    style={{ color: color, border: `1px solid ${color}40` }}
+                  />
+                  <span style={{ color: '#475569', fontSize: 18 }}>%</span>
+                </div>
               </div>
-              <div style={{ color: '#475569', fontSize: 12 }}>{item.desc}</div>
-              <div style={{ color: item.color, fontSize: 26, fontWeight: 700, marginTop: 8 }}>{item.value}%</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="flex items-start gap-2 mt-4 p-3 rounded-xl" style={{ background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.15)' }}>
           <Info size={14} color="#6366f1" className="mt-0.5 shrink-0" />
@@ -135,20 +250,20 @@ export default function Settings() {
           <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>Notification Settings</div>
         </div>
         <div className="space-y-4">
-          {[
-            { key: 'alertSound', label: 'Alert Sound', desc: 'Play sound on new violation detection' },
-            { key: 'emailAlerts', label: 'Email Alerts', desc: 'Send email for flagged violations' },
-            { key: 'smsAlerts', label: 'SMS Alerts', desc: 'Send SMS for critical events' },
-            { key: 'autoFlag', label: 'Auto-Flag High Severity', desc: 'Automatically flag violations with >90% confidence' },
-          ].map(item => (
+          {([
+            { key: 'alert_sound' as const, label: 'Alert Sound', desc: 'Play sound on new violation detection' },
+            { key: 'email_alerts' as const, label: 'Email Alerts', desc: 'Send email for flagged violations' },
+            { key: 'sms_alerts' as const, label: 'SMS Alerts', desc: 'Send SMS for critical events' },
+            { key: 'auto_flag' as const, label: 'Auto-Flag High Severity', desc: 'Automatically flag violations with >90% confidence' },
+          ] as const).map(item => (
             <div key={item.key} className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
               <div>
                 <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{item.label}</div>
                 <div style={{ color: '#475569', fontSize: 12 }}>{item.desc}</div>
               </div>
               <Toggle
-                enabled={notifications[item.key as keyof typeof notifications]}
-                onToggle={() => setNotifications(n => ({ ...n, [item.key]: !n[item.key as keyof typeof n] }))}
+                enabled={!!notifications[item.key]}
+                onToggle={() => setNotifications(n => ({ ...n, [item.key]: !n[item.key] }))}
               />
             </div>
           ))}
@@ -163,12 +278,10 @@ export default function Settings() {
         </div>
         <div className="grid md:grid-cols-2 gap-4">
           {[
-            { label: 'Camera Resolution', value: '1080p HD', editable: false },
-            { label: 'Frame Rate', value: '30 FPS', editable: false },
-            { label: 'Recording Retention', value: '30 days', editable: true },
-            { label: 'Capture on Violation', value: 'Enabled', editable: false },
-            { label: 'Night Vision Mode', value: 'Auto', editable: false },
-            { label: 'Active Cameras', value: '6 / 6', editable: false },
+            { label: 'Camera Resolution', value: camera.resolution },
+            { label: 'Frame Rate', value: `${camera.frame_rate} FPS` },
+            { label: 'Recording Retention', value: `${camera.retention_days} days` },
+            { label: 'Capture on Violation', value: camera.capture_on_detection ? 'Enabled' : 'Disabled' },
           ].map(item => (
             <div key={item.label} className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
               <div style={{ color: '#64748b', fontSize: 13 }}>{item.label}</div>
@@ -186,12 +299,12 @@ export default function Settings() {
         </div>
         <div className="grid md:grid-cols-3 gap-3">
           {[
-            { label: 'Vision Guard Version', value: 'v2.4.1' },
-            { label: 'AI Model Version', value: 'v3.2.1' },
-            { label: 'Last Model Update', value: 'Apr 10, 2026' },
-            { label: 'Database Status', value: 'Connected', color: '#10b981' },
-            { label: 'API Status', value: 'Operational', color: '#10b981' },
-            { label: 'License Valid Until', value: 'Dec 31, 2026' },
+            { label: 'Vision Guard Version', value: system?.system_version || '–' },
+            { label: 'AI Model Version', value: system?.ai_model_version || '–' },
+            { label: 'AI Endpoint', value: system?.ai_endpoint_url ? new URL(system.ai_endpoint_url).hostname : '–' },
+            { label: 'Poll Interval', value: system?.ai_poll_interval_sec ? `${system.ai_poll_interval_sec}s` : '–' },
+            { label: 'API Status', value: system?.api_status || '–', color: system?.api_status === 'active' ? '#10b981' : '#f59e0b' },
+            { label: 'Last Health Check', value: system?.last_health_check ? new Date(system.last_health_check).toLocaleString() : '–' },
           ].map(item => (
             <div key={item.label} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
               <div style={{ color: '#475569', fontSize: 11 }}>{item.label}</div>

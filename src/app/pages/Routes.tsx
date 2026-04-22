@@ -4,9 +4,11 @@ import {
   Map, MapPin, Users, Clock, Navigation, ChevronRight,
   Zap, Minus, ArrowRight, TrendingUp, Shield
 } from 'lucide-react';
-import {
-  routes, drivers, ROUTE_COLORS, ROUTE_LABELS, RouteType
-} from '../data/mockData';
+import { ROUTE_LABELS } from '../data/constants';
+import { useRoutes } from '../api/hooks';
+import type { RouteAssignment } from '../api/types';
+
+type RouteType = 'demanding' | 'moderate' | 'simple';
 
 const difficultyConfig = {
   demanding: {
@@ -32,11 +34,14 @@ const difficultyConfig = {
   },
 };
 
-const RouteCard = ({ route }: { route: typeof routes[0] }) => {
+const LoadingSkeleton = ({ height = 200 }: { height?: number }) => (
+  <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height }} />
+);
+
+const RouteCard = ({ route }: { route: RouteAssignment }) => {
   const [expanded, setExpanded] = useState(false);
   const config = difficultyConfig[route.difficulty];
   const DiffIcon = config.icon;
-  const driver = drivers.find(d => d.id === route.assignedDriverId);
 
   return (
     <div
@@ -58,7 +63,7 @@ const RouteCard = ({ route }: { route: typeof routes[0] }) => {
             </div>
             <div>
               <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>{route.name}</div>
-              <div style={{ color: '#64748b', fontSize: 12 }}>Route ID: {route.id.toUpperCase()}</div>
+              <div style={{ color: '#64748b', fontSize: 12 }}>Route ID: {route.id.slice(0, 8).toUpperCase()}</div>
             </div>
           </div>
           <span
@@ -87,8 +92,8 @@ const RouteCard = ({ route }: { route: typeof routes[0] }) => {
           {[
             { label: 'Distance', value: `${route.distance}km` },
             { label: 'Stops', value: route.stops },
-            { label: 'Daily Trips', value: route.dailyTrips },
-            { label: 'Travel', value: `~${route.avgTravelTime}m` },
+            { label: 'Daily Trips', value: route.daily_trips },
+            { label: 'Travel', value: `~${route.avg_travel_time}m` },
           ].map(item => (
             <div key={item.label} className="text-center p-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
               <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14 }}>{item.value}</div>
@@ -98,23 +103,23 @@ const RouteCard = ({ route }: { route: typeof routes[0] }) => {
         </div>
 
         {/* Assigned driver */}
-        {driver ? (
+        {route.driver_id ? (
           <div
             className="flex items-center gap-3 p-3 rounded-xl"
-            style={{ background: `${driver.avatarColor}10`, border: `1px solid ${driver.avatarColor}20` }}
+            style={{ background: `${route.driver_avatar_color || '#6366f1'}10`, border: `1px solid ${route.driver_avatar_color || '#6366f1'}20` }}
           >
             <div
               className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
-              style={{ background: `${driver.avatarColor}25`, color: driver.avatarColor }}
+              style={{ background: `${route.driver_avatar_color || '#6366f1'}25`, color: route.driver_avatar_color || '#6366f1' }}
             >
-              {driver.initials}
+              {route.driver_initials || '??'}
             </div>
             <div className="flex-1">
-              <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{driver.name}</div>
-              <div style={{ color: '#64748b', fontSize: 11 }}>Score: {driver.safetyScore}% • #{driver.rank} ranked</div>
+              <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{route.driver_name || 'Unknown'}</div>
+              <div style={{ color: '#64748b', fontSize: 11 }}>Score: {route.driver_safety_score ?? '–'}% • #{route.driver_rank ?? '–'} ranked</div>
             </div>
             <Link
-              to={`/drivers/${driver.id}`}
+              to={`/drivers/${route.driver_id}`}
               className="flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:opacity-80"
               style={{ background: 'rgba(99,102,241,0.1)', color: '#a5b4fc' }}
             >
@@ -152,11 +157,11 @@ const RouteCard = ({ route }: { route: typeof routes[0] }) => {
           <div className="grid grid-cols-2 gap-3 pt-2">
             <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
               <div style={{ color: '#475569', fontSize: 11 }}>Passenger Capacity</div>
-              <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{route.passengerCapacity} seats</div>
+              <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{route.passenger_capacity} seats</div>
             </div>
             <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
               <div style={{ color: '#475569', fontSize: 11 }}>Avg Travel Time</div>
-              <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{route.avgTravelTime} minutes</div>
+              <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{route.avg_travel_time} minutes</div>
             </div>
           </div>
         </div>
@@ -167,12 +172,13 @@ const RouteCard = ({ route }: { route: typeof routes[0] }) => {
 
 export default function Routes() {
   const [filter, setFilter] = useState<string>('all');
+  const { data: result, loading } = useRoutes(filter);
+
+  const routes = result?.data || [];
 
   const demanding = routes.filter(r => r.difficulty === 'demanding');
   const moderate = routes.filter(r => r.difficulty === 'moderate');
   const simple = routes.filter(r => r.difficulty === 'simple');
-
-  const filtered = filter === 'all' ? routes : routes.filter(r => r.difficulty === filter);
 
   return (
     <div className="p-6 space-y-6">
@@ -253,11 +259,24 @@ export default function Routes() {
       </div>
 
       {/* Route cards grid */}
-      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filtered.map(route => (
-          <RouteCard key={route.id} route={route} />
-        ))}
-      </div>
+      {loading ? (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1,2,3,4,5,6].map(i => <LoadingSkeleton key={i} height={280} />)}
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {routes.map(route => (
+            <RouteCard key={route.id} route={route} />
+          ))}
+        </div>
+      )}
+
+      {!loading && routes.length === 0 && (
+        <div className="text-center py-12">
+          <Map size={32} color="#334155" className="mx-auto mb-3" />
+          <div style={{ color: '#475569' }}>No routes found.</div>
+        </div>
+      )}
     </div>
   );
 }
