@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import React, { useState, useRef, useEffect } from 'react';
+import { NavLink, Outlet, useLocation, Link } from 'react-router';
 import {
   LayoutDashboard,
   Users,
@@ -12,8 +12,16 @@ import {
   ChevronRight,
   Menu,
   Eye,
+  Phone,
+  Glasses,
+  Brain,
+  Cigarette,
+  CheckCircle,
+  Flag,
+  X,
 } from 'lucide-react';
-import { useDashboardSummaryPolled, useAiStatus } from '../api/hooks';
+import { useDashboardSummaryPolled, useAiStatus, useRecentViolations } from '../api/hooks';
+import { VIOLATION_COLORS, VIOLATION_LABELS } from '../data/constants';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
@@ -27,20 +35,53 @@ const bottomNav = [
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
+const violationIcons: Record<string, any> = {
+  phone: Phone,
+  mobile: Phone,
+  sunglasses: Glasses,
+  drowsiness: Brain,
+  drowsy: Brain,
+  smoking: Cigarette,
+};
+
+const statusConfig: Record<string, { color: string; icon: any; label: string }> = {
+  pending: { color: '#f59e0b', icon: AlertTriangle, label: 'Pending' },
+  reviewed: { color: '#10b981', icon: CheckCircle, label: 'Reviewed' },
+  flagged: { color: '#ef4444', icon: Flag, label: 'Flagged' },
+};
+
 export function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
   const location = useLocation();
+  const notifRef = useRef<HTMLDivElement>(null);
 
   // Live stats from the backend (polled every 30s)
   const { data: summaryRes } = useDashboardSummaryPolled();
   const { data: aiStatusRes } = useAiStatus();
+  const { data: recentRes } = useRecentViolations(10);
 
   const summary = summaryRes?.data;
   const aiStatus = aiStatusRes?.data;
+  const notifications = recentRes?.data || [];
 
   const activeDrivers = summary?.active_drivers ?? '–';
   const pendingAlerts = (summary?.pending_violations ?? 0) + (summary?.flagged_violations ?? 0);
+
+  // Close notif panel on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
+      }
+    };
+    if (notifOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [notifOpen]);
+
+  // Close notif panel on route change
+  useEffect(() => { setNotifOpen(false); }, [location.pathname]);
 
   const getPageTitle = () => {
     const path = location.pathname;
@@ -52,6 +93,20 @@ export function Layout() {
     if (path.startsWith('/reports')) return 'Analytics & Reports';
     if (path.startsWith('/settings')) return 'Settings';
     return 'Vision Guard';
+  };
+
+  const formatTimeAgo = (dateStr: string) => {
+    if (!dateStr) return '';
+    const now = new Date();
+    const d = new Date(dateStr);
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDays = Math.floor(diffHr / 24);
+    return `${diffDays}d ago`;
   };
 
   return (
@@ -235,13 +290,136 @@ export function Layout() {
             )}
           </div>
 
-          {/* Notification bell */}
-          <button className="relative p-2 rounded-xl transition-all hover:opacity-80" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
-            <Bell size={18} color="#a5b4fc" />
-            {pendingAlerts > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#ef4444' }} />
+          {/* Notification bell + dropdown */}
+          <div className="relative" ref={notifRef}>
+            <button
+              onClick={() => setNotifOpen(!notifOpen)}
+              className="relative p-2 rounded-xl transition-all hover:opacity-80"
+              style={{
+                background: notifOpen ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.1)',
+                border: notifOpen ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(99,102,241,0.2)',
+              }}
+            >
+              <Bell size={18} color="#a5b4fc" />
+              {pendingAlerts > 0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: '#ef4444', border: '2px solid #080d1a' }} />
+              )}
+            </button>
+
+            {/* Notification dropdown panel */}
+            {notifOpen && (
+              <div
+                className="absolute right-0 top-full mt-2 w-96 max-h-[480px] rounded-2xl overflow-hidden z-50"
+                style={{
+                  background: '#111827',
+                  border: '1px solid rgba(99,102,241,0.2)',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                }}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="flex items-center gap-2">
+                    <Bell size={15} color="#a5b4fc" />
+                    <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14 }}>Notifications</span>
+                    {pendingAlerts > 0 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded-full text-xs font-bold"
+                        style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
+                      >
+                        {pendingAlerts}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setNotifOpen(false)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-all"
+                    style={{ background: 'rgba(255,255,255,0.05)' }}
+                  >
+                    <X size={14} color="#64748b" />
+                  </button>
+                </div>
+
+                {/* Notification list */}
+                <div className="overflow-y-auto max-h-[380px]">
+                  {notifications.length === 0 ? (
+                    <div className="py-12 text-center">
+                      <CheckCircle size={28} color="#10b981" className="mx-auto mb-2" />
+                      <div style={{ color: '#10b981', fontWeight: 600, fontSize: 13 }}>All clear!</div>
+                      <div style={{ color: '#475569', fontSize: 12 }}>No recent violations detected.</div>
+                    </div>
+                  ) : (
+                    notifications.map((n, i) => {
+                      const Icon = violationIcons[n.violation_type] || AlertTriangle;
+                      const color = VIOLATION_COLORS[n.violation_type] || '#6366f1';
+                      const sc = statusConfig[n.status] || statusConfig.pending;
+                      const isPending = n.status === 'pending' || n.status === 'flagged';
+                      return (
+                        <Link
+                          key={n.id}
+                          to="/violations"
+                          onClick={() => setNotifOpen(false)}
+                          className="flex items-start gap-3 px-4 py-3 transition-all hover:opacity-80"
+                          style={{
+                            borderBottom: i < notifications.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                            background: isPending ? 'rgba(245,158,11,0.03)' : 'transparent',
+                          }}
+                        >
+                          {/* Icon */}
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5" style={{ background: `${color}15` }}>
+                            <Icon size={16} color={color} />
+                          </div>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>
+                                {VIOLATION_LABELS[n.violation_type] || n.violation_label}
+                              </span>
+                              <span
+                                className="px-1.5 py-0.5 rounded text-xs"
+                                style={{ background: `${sc.color}15`, color: sc.color, fontSize: 10, fontWeight: 600 }}
+                              >
+                                {sc.label}
+                              </span>
+                            </div>
+                            <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>
+                              <span style={{ fontWeight: 600 }}>{n.driver_name}</span>
+                              {n.route_name && <span> • {n.route_name}</span>}
+                            </div>
+                            <div className="flex items-center justify-between mt-1">
+                              <span style={{ color: '#475569', fontSize: 10 }}>
+                                {n.detection_date ? formatTimeAgo(n.detection_date) : ''}
+                              </span>
+                              {n.confidence && (
+                                <span style={{ color: color, fontSize: 10, fontWeight: 600 }}>{n.confidence}% conf.</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Unread dot */}
+                          {isPending && (
+                            <div className="w-2 h-2 rounded-full shrink-0 mt-2" style={{ background: sc.color }} />
+                          )}
+                        </Link>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Footer */}
+                {notifications.length > 0 && (
+                  <Link
+                    to="/violations"
+                    onClick={() => setNotifOpen(false)}
+                    className="flex items-center justify-center py-2.5 transition-all hover:opacity-80"
+                    style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: '#a5b4fc', fontSize: 12, fontWeight: 600 }}
+                  >
+                    View all violations →
+                  </Link>
+                )}
+              </div>
             )}
-          </button>
+          </div>
 
           {/* User avatar */}
           <div className="flex items-center gap-2">
