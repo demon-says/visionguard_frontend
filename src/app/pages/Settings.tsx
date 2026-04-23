@@ -145,54 +145,42 @@ function ActiveAssignments() {
                 </div>
 
                 {/* Driver selector */}
-                <div className="flex-1 min-w-[200px]">
+                <div className="flex-1 min-w-[220px]">
                   <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>Assigned Driver</div>
                   <div className="relative">
                     <select
                       value={route.driver_id || ''}
                       onChange={e => handleReassign(route.id, route.bus_id, e.target.value)}
                       disabled={isProcessing || !route.bus_id}
-                      className="w-full px-3 py-2.5 rounded-xl text-sm font-semibold appearance-none cursor-pointer transition-all outline-none disabled:opacity-50"
+                      className="w-full px-3 py-2.5 pr-10 rounded-xl text-sm font-semibold cursor-pointer transition-all outline-none disabled:opacity-50"
                       style={{
-                        background: 'rgba(99,102,241,0.08)',
+                        background: 'rgba(99,102,241,0.12)',
                         color: '#f1f5f9',
-                        border: '1px solid rgba(99,102,241,0.2)',
-                        paddingRight: 36,
+                        border: '1px solid rgba(99,102,241,0.3)',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                        appearance: 'none',
                       }}
                     >
-                      <option value="" style={{ background: '#111827', color: '#64748b' }}>— Unassigned —</option>
+                      <option value="" style={{ background: '#111827', color: '#64748b' }}>— Select a Driver —</option>
                       {allDrivers.map(d => (
                         <option key={d.id} value={d.id} style={{ background: '#111827', color: '#f1f5f9' }}>
                           {d.name} (Score: {d.safety_score} · #{d.rank})
                         </option>
                       ))}
                     </select>
-                    {isProcessing && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {/* Dropdown arrow / spinner */}
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      {isProcessing ? (
                         <Loader2 size={14} className="animate-spin" color="#6366f1" />
-                      </div>
-                    )}
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a5b4fc" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                {/* Current driver badge */}
-                {route.driver_name && (
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold"
-                      style={{
-                        background: `${route.driver_avatar_color || '#6366f1'}25`,
-                        color: route.driver_avatar_color || '#6366f1',
-                      }}
-                    >
-                      {route.driver_initials || '??'}
-                    </div>
-                    <div>
-                      <div style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>{route.driver_name}</div>
-                      <div style={{ color: '#475569', fontSize: 10 }}>Score: {route.driver_safety_score ?? '–'}</div>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}
