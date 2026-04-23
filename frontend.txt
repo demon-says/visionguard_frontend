@@ -1,0 +1,1248 @@
+
+
+================================================================================
+FILE: ./src\app\api\apiClient.ts
+================================================================================
+
+// src/app/api/apiClient.ts
+// ─────────────────────────────────────────────────────────────
+// Central API client for Vision Guard.
+// All pages use this to talk to the Express backend.
+//
+// In development, requests go through the Vite proxy (/api → localhost:5000).
+// In production, set VITE_API_BASE_URL to the deployed backend URL.
+// ─────────────────────────────────────────────────────────────
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+export class ApiError extends Error {
+  status: number;
+  code: string;
+
+  constructor(status: number, message: string, code: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function buildQuery(params?: Record<string, unknown>): string {
+  if (!params) return '';
+  const entries = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== 'all')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  return entries.length ? `?${entries.join('&')}` : '';
+}
+
+async function request<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const url = `${API_BASE}${path}`;
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  // Attempt to parse JSON even on error responses
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    throw new ApiError(res.status, 'Invalid JSON response from server', 'PARSE_ERROR');
+  }
+
+  if (!res.ok || json.success === false) {
+    throw new ApiError(
+      res.status,
+      json.error || `Request failed with status ${res.status}`,
+      json.code || 'UNKNOWN_ERROR',
+    );
+  }
+
+  return json as T;
+}
+
+export const api = {
+  get<T>(path: string, params?: Record<string, unknown>): Promise<T> {
+    return request<T>('GET', path + buildQuery(params));
+  },
+
+  post<T>(path: string, body?: unknown): Promise<T> {
+    return request<T>('POST', path, body);
+  },
+
+  put<T>(path: string, body: unknown): Promise<T> {
+    return request<T>('PUT', path, body);
+  },
+
+  patch<T>(path: string, body: unknown): Promise<T> {
+    return request<T>('PATCH', path, body);
+  },
+};
+
+
+================================================================================
+FILE: ./src\app\api\hooks.ts
+================================================================================
+
+// src/app/api/hooks.ts
+// ─────────────────────────────────────────────────────────────
+// Custom React hooks wrapping every API endpoint.
+// Each hook manages loading, error, and data state.
+// ─────────────────────────────────────────────────────────────
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { api, ApiError } from './apiClient';
+import type {
+  ApiResponse,
+  PaginatedResponse,
+  DashboardSummary,
+  WeeklyTrendItem,
+  ViolationMixItem,
+  RecentViolation,
+  DriverStats,
+  DriverProfile,
+  ViolationDetail,
+  RouteAssignment,
+  ReportKPIs,
+  MonthlyComparison,
+  HourlyPatternItem,
+  DriverScoreItem,
+  AllSettings,
+  DetectionSetting,
+  RouteThreshold,
+  NotificationSettings,
+  CameraSettings,
+  AiStatus,
+  AiConfig,
+} from './types';
+
+// ── Generic fetch hook ─────────────────────────────────────
+
+interface UseApiResult<T> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+}
+
+function useApi<T>(
+  fetcher: () => Promise<T>,
+  deps: unknown[] = [],
+): UseApiResult<T> {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetcher();
+      if (mountedRef.current) {
+        setData(result);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof ApiError ? err.message : 'An unexpected error occurred');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    return () => { mountedRef.current = false; };
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
+}
+
+// ── Polling variant ────────────────────────────────────────
+
+function usePolledApi<T>(
+  fetcher: () => Promise<T>,
+  intervalMs: number,
+  deps: unknown[] = [],
+): UseApiResult<T> {
+  const result = useApi(fetcher, deps);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      result.refetch();
+    }, intervalMs);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervalMs, result.refetch]);
+
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────
+// DASHBOARD HOOKS
+// ─────────────────────────────────────────────────────────────
+
+// Polled version for dashboard and layout (30s auto-refresh)
+export function useDashboardSummaryPolled() {
+  return usePolledApi<ApiResponse<DashboardSummary>>(
+    () => api.get('/api/dashboard/summary'),
+    30_000,
+    [],
+  );
+}
+
+export function useRecentViolations(limit = 5) {
+  return usePolledApi<ApiResponse<RecentViolation[]>>(
+    () => api.get('/api/dashboard/recent', { limit }),
+    30_000,
+    [limit],
+  );
+}
+
+export function useTopDrivers(limit = 3) {
+  return useApi<ApiResponse<DriverStats[]>>(
+    () => api.get('/api/dashboard/top-drivers', { limit }),
+    [limit],
+  );
+}
+
+export function useBottomDrivers(limit = 3) {
+  return useApi<ApiResponse<DriverStats[]>>(
+    () => api.get('/api/dashboard/bottom-drivers', { limit }),
+    [limit],
+  );
+}
+
+export function useWeeklyTrend() {
+  return useApi<ApiResponse<WeeklyTrendItem[]>>(
+    () => api.get('/api/dashboard/weekly-trend'),
+    [],
+  );
+}
+
+export function useDashboardViolationMix() {
+  return useApi<ApiResponse<ViolationMixItem[]>>(
+    () => api.get('/api/dashboard/violation-mix'),
+    [],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// DRIVERS HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export interface DriverFilters {
+  status?: string;
+  routeType?: string;
+  search?: string;
+  sortBy?: string;
+  order?: string;
+  page?: number;
+  limit?: number;
+}
+
+export function useDrivers(filters: DriverFilters) {
+  return useApi<PaginatedResponse<DriverStats>>(
+    () => api.get('/api/drivers', filters as Record<string, unknown>),
+    [filters.status, filters.routeType, filters.search, filters.sortBy, filters.order, filters.page, filters.limit],
+  );
+}
+
+export function useDriver(id: string | undefined) {
+  return useApi<ApiResponse<DriverProfile>>(
+    () => api.get(`/api/drivers/${id}`),
+    [id],
+  );
+}
+
+export function useDriverViolations(
+  id: string | undefined,
+  filters?: { type?: string; status?: string; page?: number; limit?: number },
+) {
+  return useApi<PaginatedResponse<ViolationDetail>>(
+    () => api.get(`/api/drivers/${id}/violations`, filters as Record<string, unknown>),
+    [id, filters?.type, filters?.status, filters?.page, filters?.limit],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// VIOLATIONS HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export interface ViolationFilters {
+  type?: string;
+  status?: string;
+  driverName?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  limit?: number;
+}
+
+export function useViolations(filters: ViolationFilters) {
+  return useApi<PaginatedResponse<ViolationDetail>>(
+    () => api.get('/api/violations', filters as Record<string, unknown>),
+    [filters.type, filters.status, filters.driverName, filters.dateFrom, filters.dateTo, filters.page, filters.limit],
+  );
+}
+
+export function useUpdateViolation() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const update = async (
+    id: string,
+    body: { status?: string; notes?: string; reviewedBy?: string },
+  ) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.patch<ApiResponse<unknown>>(`/api/violations/${id}`, body);
+      return result;
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to update violation';
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { update, loading, error };
+}
+
+export function useBulkUpdateViolations() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const bulkUpdate = async (
+    ids: string[],
+    status: string,
+    reviewedBy?: string,
+  ) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.patch<ApiResponse<{ updated: number }>>('/api/violations/bulk', {
+        ids,
+        status,
+        reviewedBy,
+      });
+      return result;
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to bulk update violations';
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { bulkUpdate, loading, error };
+}
+
+// ─────────────────────────────────────────────────────────────
+// ROUTES HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export function useRoutes(difficulty?: string) {
+  return useApi<ApiResponse<RouteAssignment[]>>(
+    () => api.get('/api/routes', difficulty && difficulty !== 'all' ? { difficulty } : {}),
+    [difficulty],
+  );
+}
+
+export function useRouteRecommendation(driverId: string) {
+  return useApi<ApiResponse<{
+    driverId: string;
+    driverName: string;
+    safetyScore: number;
+    recommended: string;
+    thresholds: { route_type: string; min_safety_score: number }[];
+  }>>(
+    () => api.get(`/api/routes/recommend/${driverId}`),
+    [driverId],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// REPORTS HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export function useReportKPIs() {
+  return useApi<ApiResponse<ReportKPIs>>(
+    () => api.get('/api/reports/kpis'),
+    [],
+  );
+}
+
+export function useDailyTrend(days = 30) {
+  return useApi<ApiResponse<WeeklyTrendItem[]>>(
+    () => api.get('/api/reports/daily-trend', { days }),
+    [days],
+  );
+}
+
+export function useMonthlyComparison() {
+  return useApi<ApiResponse<MonthlyComparison>>(
+    () => api.get('/api/reports/monthly-comparison'),
+    [],
+  );
+}
+
+export function useHourlyPattern() {
+  return useApi<ApiResponse<HourlyPatternItem[]>>(
+    () => api.get('/api/reports/hourly-pattern'),
+    [],
+  );
+}
+
+export function useReportViolationMix() {
+  return useApi<ApiResponse<ViolationMixItem[]>>(
+    () => api.get('/api/reports/violation-mix'),
+    [],
+  );
+}
+
+export function useDriverScores() {
+  return useApi<ApiResponse<DriverScoreItem[]>>(
+    () => api.get('/api/reports/driver-scores'),
+    [],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SETTINGS HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export function useAllSettings() {
+  return useApi<ApiResponse<AllSettings>>(
+    () => api.get('/api/settings/all'),
+    [],
+  );
+}
+
+export function useUpdateDetectionSettings() {
+  const [loading, setLoading] = useState(false);
+
+  const update = async (settings: DetectionSetting[]) => {
+    setLoading(true);
+    try {
+      return await api.put<ApiResponse<DetectionSetting[]>>('/api/settings/detection', settings);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { update, loading };
+}
+
+export function useUpdateRouteThresholds() {
+  const [loading, setLoading] = useState(false);
+
+  const update = async (thresholds: RouteThreshold[]) => {
+    setLoading(true);
+    try {
+      return await api.put<ApiResponse<RouteThreshold[]>>('/api/settings/route-thresholds', thresholds);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { update, loading };
+}
+
+export function useUpdateNotifications() {
+  const [loading, setLoading] = useState(false);
+
+  const update = async (settings: Partial<NotificationSettings>) => {
+    setLoading(true);
+    try {
+      return await api.put<ApiResponse<NotificationSettings>>('/api/settings/notifications', settings);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { update, loading };
+}
+
+export function useUpdateCamera() {
+  const [loading, setLoading] = useState(false);
+
+  const update = async (settings: Partial<CameraSettings>) => {
+    setLoading(true);
+    try {
+      return await api.put<ApiResponse<CameraSettings>>('/api/settings/camera', settings);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { update, loading };
+}
+
+// ─────────────────────────────────────────────────────────────
+// AI HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export function useAiStatus() {
+  return usePolledApi<ApiResponse<AiStatus>>(
+    () => api.get('/api/ai/status'),
+    15_000,
+    [],
+  );
+}
+
+export function useAiConfig() {
+  return useApi<ApiResponse<AiConfig>>(
+    () => api.get('/api/ai/config'),
+    [],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// DRIVER STATUS UPDATE
+// ─────────────────────────────────────────────────────────────
+
+export function useUpdateDriverStatus() {
+  const [loading, setLoading] = useState(false);
+
+  const update = async (id: string, status: string) => {
+    setLoading(true);
+    try {
+      return await api.patch<ApiResponse<{ id: string; name: string; status: string }>>(
+        `/api/drivers/${id}/status`,
+        { status },
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { update, loading };
+}
+
+
+================================================================================
+FILE: ./src\app\api\types.ts
+================================================================================
+
+// src/app/api/types.ts
+// ─────────────────────────────────────────────────────────────
+// TypeScript interfaces matching the Express backend's response
+// shapes. All field names are snake_case to match the API contract.
+// ─────────────────────────────────────────────────────────────
+
+// ── Generic response wrappers ──────────────────────────────
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+  errors?: string[];
+}
+
+export interface PaginatedResponse<T> {
+  success: boolean;
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+  };
+}
+
+// ── Dashboard ──────────────────────────────────────────────
+
+export interface DashboardSummary {
+  total_drivers: number;
+  active_drivers: number;
+  inactive_drivers: number;
+  suspended_drivers: number;
+  total_violations: number;
+  total_phone: number;
+  total_sunglasses: number;
+  total_drowsy: number;
+  total_smoking: number;
+  avg_safety_score: number;
+  total_routes: number;
+  pending_violations: number;
+  flagged_violations: number;
+  reviewed_violations: number;
+}
+
+export interface WeeklyTrendItem {
+  detection_date: string;
+  total: number;
+  phone: number;
+  sunglasses: number;
+  drowsy: number;
+  smoking: number;
+}
+
+export interface ViolationMixItem {
+  name: string;
+  value: number;
+  color: string;
+  pct?: number;
+}
+
+// ── Drivers ────────────────────────────────────────────────
+
+export interface DriverStats {
+  id: string;
+  name: string;
+  license_number: string;
+  initials: string;
+  avatar_color: string;
+  status: 'active' | 'inactive' | 'suspended';
+  safety_score: number;
+  rank: number;
+  total_violations: number;
+  phone_violations: number;
+  sunglasses_violations: number;
+  drowsiness_violations: number;
+  smoking_violations: number;
+  route_id: string;
+  route_name: string;
+  route_type: 'demanding' | 'moderate' | 'simple';
+  bus_number: string;
+  recommended_route_type: string;
+  experience_years: number;
+  join_date: string;
+  last_active: string;
+}
+
+export interface DriverProfile extends DriverStats {
+  recentViolations: ViolationDetail[];
+}
+
+// ── Violations ─────────────────────────────────────────────
+
+export interface ViolationDetail {
+  id: string;
+  violation_type: string;
+  violation_label: string;
+  driver_id: string;
+  driver_name: string;
+  initials: string;
+  avatar_color: string;
+  route_name: string;
+  bus_number: string;
+  confidence: number;
+  status: 'pending' | 'reviewed' | 'flagged';
+  detection_date: string;
+  start_time: string;
+  end_time: string;
+  duration_sec: number;
+  image_url: string;
+  image_name: string;
+  inserted_at: string;
+  notes?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+}
+
+export interface RecentViolation {
+  id: string;
+  violation_type: string;
+  violation_label: string;
+  driver_name: string;
+  initials: string;
+  avatar_color: string;
+  route_name: string;
+  confidence: number;
+  status: string;
+  detection_date: string;
+  start_time: string;
+  image_url: string;
+  bus_number: string;
+}
+
+// ── Routes ─────────────────────────────────────────────────
+
+export interface RouteAssignment {
+  id: string;
+  name: string;
+  from: string;
+  to: string;
+  distance: number;
+  difficulty: 'demanding' | 'moderate' | 'simple';
+  stops: number;
+  daily_trips: number;
+  avg_travel_time: number;
+  passenger_capacity: number;
+  description: string;
+  bus_id: string;
+  bus_number: string;
+  driver_id: string | null;
+  driver_name: string | null;
+  driver_initials: string | null;
+  driver_avatar_color: string | null;
+  driver_safety_score: number | null;
+  driver_rank: number | null;
+  totalViolationsOnRoute?: number;
+}
+
+// ── Reports ────────────────────────────────────────────────
+
+export interface ReportKPIs {
+  totalViolations: number;
+  fleetSafetyScore: number;
+  driversImproved: number;
+  detectionAccuracy: number;
+}
+
+export interface MonthlyComparison {
+  thisMonth: { detection_date: string; total: number }[];
+  lastMonth: { detection_date: string; total: number }[];
+}
+
+export interface HourlyPatternItem {
+  hour: number;
+  total_violations: number;
+  phone: number;
+  sunglasses: number;
+  drowsy: number;
+  smoking: number;
+}
+
+export interface DriverScoreItem {
+  id: string;
+  name: string;
+  initials: string;
+  avatar_color: string;
+  safety_score: number;
+  rank: number;
+  total_violations: number;
+  route_type: string;
+}
+
+// ── Settings ───────────────────────────────────────────────
+
+export interface DetectionSetting {
+  id?: string;
+  module_name: string;
+  is_enabled: boolean;
+  confidence_threshold: number;
+}
+
+export interface RouteThreshold {
+  id?: string;
+  route_type: string;
+  min_safety_score: number;
+}
+
+export interface NotificationSettings {
+  id?: string;
+  alert_sound: boolean;
+  email_alerts: boolean;
+  sms_alerts: boolean;
+  auto_flag: boolean;
+  auto_suspend_threshold: number;
+}
+
+export interface CameraSettings {
+  id?: string;
+  resolution: string;
+  frame_rate: number;
+  retention_days: number;
+  capture_on_detection: boolean;
+}
+
+export interface SystemInfo {
+  system_version: string;
+  ai_model_version: string;
+  api_status: string;
+  ai_endpoint_url: string;
+  ai_poll_interval_sec: number;
+  last_health_check: string;
+}
+
+export interface AllSettings {
+  detection: DetectionSetting[];
+  thresholds: RouteThreshold[];
+  notifications: NotificationSettings;
+  camera: CameraSettings;
+  system: SystemInfo;
+}
+
+// ── AI ─────────────────────────────────────────────────────
+
+export interface AiStatus {
+  isRunning: boolean;
+  lastFetchAt: string | null;
+  lastError: string | null;
+  fetchCount: number;
+  totalInserted: number;
+}
+
+export interface AiConfig {
+  ai_endpoint_url: string;
+  ai_poll_interval_sec: number;
+  api_status: string;
+}
+
+
+================================================================================
+FILE: ./src\app\components\ui\use-mobile.ts
+================================================================================
+
+import * as React from "react";
+
+const MOBILE_BREAKPOINT = 768;
+
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(
+    undefined,
+  );
+
+  React.useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    const onChange = () => {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    };
+    mql.addEventListener("change", onChange);
+    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  return !!isMobile;
+}
+
+
+================================================================================
+FILE: ./src\app\components\ui\utils.ts
+================================================================================
+
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+
+================================================================================
+FILE: ./src\app\data\constants.ts
+================================================================================
+
+// src/app/data/constants.ts
+// ─────────────────────────────────────────────────────────────
+// Display-logic constants kept from the original mockData.ts.
+// These define colors, labels, and types used across the UI —
+// they are NOT data, they are presentation helpers.
+// ─────────────────────────────────────────────────────────────
+
+export type ViolationType = 'phone' | 'sunglasses' | 'drowsiness' | 'smoking';
+export type RouteType = 'demanding' | 'moderate' | 'simple';
+export type ViolationStatus = 'reviewed' | 'pending' | 'flagged';
+export type DriverStatus = 'active' | 'inactive' | 'suspended';
+
+// Also support the backend's "mobile" / "drowsy" naming
+export type BackendViolationType = 'mobile' | 'sunglasses' | 'drowsy' | 'smoking';
+
+export const VIOLATION_COLORS: Record<string, string> = {
+  phone: '#f97316',
+  mobile: '#f97316',
+  sunglasses: '#eab308',
+  drowsiness: '#ef4444',
+  drowsy: '#ef4444',
+  smoking: '#a855f7',
+};
+
+export const VIOLATION_LABELS: Record<string, string> = {
+  phone: 'Phone Usage',
+  mobile: 'Phone Usage',
+  sunglasses: 'Wearing Sunglasses',
+  drowsiness: 'Drowsiness',
+  drowsy: 'Drowsiness',
+  smoking: 'Smoking',
+};
+
+export const ROUTE_COLORS: Record<RouteType, string> = {
+  demanding: '#10b981',
+  moderate: '#3b82f6',
+  simple: '#6b7280',
+};
+
+export const ROUTE_LABELS: Record<RouteType, string> = {
+  demanding: 'Demanding',
+  moderate: 'Moderate',
+  simple: 'Simple',
+};
+
+
+================================================================================
+FILE: ./src\app\data\mockData.ts
+================================================================================
+
+export type ViolationType = 'phone' | 'sunglasses' | 'drowsiness' | 'smoking';
+export type RouteType = 'demanding' | 'moderate' | 'simple';
+export type ViolationStatus = 'reviewed' | 'pending' | 'flagged';
+export type DriverStatus = 'active' | 'inactive' | 'suspended';
+
+export interface Driver {
+  id: string;
+  name: string;
+  age: number;
+  licenseNumber: string;
+  violations: {
+    phone: number;
+    sunglasses: number;
+    drowsiness: number;
+    smoking: number;
+  };
+  totalViolations: number;
+  safetyScore: number;
+  rank: number;
+  assignedRouteId: string;
+  assignedRouteName: string;
+  routeType: RouteType;
+  status: DriverStatus;
+  joinDate: string;
+  lastActive: string;
+  initials: string;
+  avatarColor: string;
+  experience: number; // years
+}
+
+export interface Violation {
+  id: string;
+  driverId: string;
+  driverName: string;
+  type: ViolationType;
+  timestamp: string;
+  location: string;
+  confidence: number;
+  status: ViolationStatus;
+  route: string;
+  frameCapture?: string;
+}
+
+export interface Route {
+  id: string;
+  name: string;
+  from: string;
+  to: string;
+  distance: number;
+  difficulty: RouteType;
+  assignedDriverId: string | null;
+  assignedDriverName: string | null;
+  passengerCapacity: number;
+  dailyTrips: number;
+  description: string;
+  stops: number;
+  avgTravelTime: number; // minutes
+}
+
+export const VIOLATION_COLORS: Record<ViolationType, string> = {
+  phone: '#f97316',
+  sunglasses: '#eab308',
+  drowsiness: '#ef4444',
+  smoking: '#a855f7',
+};
+
+export const VIOLATION_LABELS: Record<ViolationType, string> = {
+  phone: 'Phone Usage',
+  sunglasses: 'Wearing Sunglasses',
+  drowsiness: 'Drowsiness',
+  smoking: 'Smoking',
+};
+
+export const ROUTE_COLORS: Record<RouteType, string> = {
+  demanding: '#10b981',
+  moderate: '#3b82f6',
+  simple: '#6b7280',
+};
+
+export const ROUTE_LABELS: Record<RouteType, string> = {
+  demanding: 'Demanding',
+  moderate: 'Moderate',
+  simple: 'Simple',
+};
+
+export const drivers: Driver[] = [
+  {
+    id: 'd1',
+    name: 'James Carter',
+    age: 34,
+    licenseNumber: 'DL-2019-4421',
+    violations: { phone: 0, sunglasses: 1, drowsiness: 0, smoking: 0 },
+    totalViolations: 1,
+    safetyScore: 97,
+    rank: 1,
+    assignedRouteId: 'r1',
+    assignedRouteName: 'Metro Express Line A',
+    routeType: 'demanding',
+    status: 'active',
+    joinDate: '2019-03-15',
+    lastActive: '2026-04-18T08:42:00',
+    initials: 'JC',
+    avatarColor: '#6366f1',
+    experience: 7,
+  },
+  {
+    id: 'd2',
+    name: 'Sofia Alvarez',
+    age: 28,
+    licenseNumber: 'DL-2021-7834',
+    violations: { phone: 0, sunglasses: 0, drowsiness: 1, smoking: 0 },
+    totalViolations: 1,
+    safetyScore: 96,
+    rank: 2,
+    assignedRouteId: 'r2',
+    assignedRouteName: 'Airport Shuttle Line B',
+    routeType: 'demanding',
+    status: 'active',
+    joinDate: '2021-07-20',
+    lastActive: '2026-04-18T09:10:00',
+    initials: 'SA',
+    avatarColor: '#06b6d4',
+    experience: 5,
+  },
+  {
+    id: 'd3',
+    name: 'Marcus Johnson',
+    age: 41,
+    licenseNumber: 'DL-2015-1102',
+    violations: { phone: 1, sunglasses: 0, drowsiness: 1, smoking: 0 },
+    totalViolations: 2,
+    safetyScore: 91,
+    rank: 3,
+    assignedRouteId: 'r3',
+    assignedRouteName: 'City Center Route C',
+    routeType: 'demanding',
+    status: 'active',
+    joinDate: '2015-11-08',
+    lastActive: '2026-04-18T07:55:00',
+    initials: 'MJ',
+    avatarColor: '#10b981',
+    experience: 11,
+  },
+  {
+    id: 'd4',
+    name: 'Priya Sharma',
+    age: 32,
+    licenseNumber: 'DL-2020-3356',
+    violations: { phone: 2, sunglasses: 1, drowsiness: 0, smoking: 0 },
+    totalViolations: 3,
+    safetyScore: 85,
+    rank: 4,
+    assignedRouteId: 'r4',
+    assignedRouteName: 'Suburban Line D',
+    routeType: 'moderate',
+    status: 'active',
+    joinDate: '2020-01-12',
+    lastActive: '2026-04-18T08:00:00',
+    initials: 'PS',
+    avatarColor: '#f59e0b',
+    experience: 6,
+  },
+  {
+    id: 'd5',
+    name: 'Daniel Kim',
+    age: 37,
+    licenseNumber: 'DL-2018-9901',
+    violations: { phone: 1, sunglasses: 2, drowsiness: 1, smoking: 0 },
+    totalViolations: 4,
+    safetyScore: 80,
+    rank: 5,
+    assignedRouteId: 'r5',
+    assignedRouteName: 'Cross-Town Route E',
+    routeType: 'moderate',
+    status: 'active',
+    joinDate: '2018-06-03',
+    lastActive: '2026-04-18T09:30:00',
+    initials: 'DK',
+    avatarColor: '#8b5cf6',
+    experience: 8,
+  },
+  {
+    id: 'd6',
+    name: 'Amina Hassan',
+    age: 29,
+    licenseNumber: 'DL-2022-6672',
+    violations: { phone: 2, sunglasses: 1, drowsiness: 2, smoking: 0 },
+    totalViolations: 5,
+    safetyScore: 74,
+    rank: 6,
+    assignedRouteId: 'r6',
+    assignedRouteName: 'North District Line F',
+    routeType: 'moderate',
+    status: 'active',
+    joinDate: '2022-03-18',
+    lastActive: '2026-04-17T16:45:00',
+    initials: 'AH',
+    avatarColor: '#ec4899',
+    experience: 4,
+  },
+  {
+    id: 'd7',
+    name: 'Robert Walsh',
+    age: 45,
+    licenseNumber: 'DL-2013-4410',
+    violations: { phone: 3, sunglasses: 1, drowsiness: 2, smoking: 1 },
+    totalViolations: 7,
+    safetyScore: 64,
+    rank: 7,
+    assignedRouteId: 'r7',
+    assignedRouteName: 'Local Street Route G',
+    routeType: 'simple',
+    status: 'active',
+    joinDate: '2013-09-22',
+    lastActive: '2026-04-18T07:20:00',
+    initials: 'RW',
+    avatarColor: '#f97316',
+    experience: 13,
+  },
+  {
+    id: 'd8',
+    name: 'Yuki Tanaka',
+    age: 26,
+    licenseNumber: 'DL-2023-1188',
+    violations: { phone: 4, sunglasses: 0, drowsiness: 3, smoking: 1 },
+    totalViolations: 8,
+    safetyScore: 58,
+    rank: 8,
+    assignedRouteId: 'r8',
+    assignedRouteName: 'Inner Ring Route H',
+    routeType: 'simple',
+    status: 'active',
+    joinDate: '2023-02-14',
+    lastActive: '2026-04-17T14:00:00',
+    initials: 'YT',
+    avatarColor: '#14b8a6',
+    experience: 3,
+  },
+  {
+    id: 'd9',
+    name: 'Carlos Mendez',
+    age: 38,
+    licenseNumber: 'DL-2017-5543',
+    violations: { phone: 5, sunglasses: 2, drowsiness: 3, smoking: 2 },
+    totalViolations: 12,
+    safetyScore: 42,
+    rank: 9,
+    assignedRouteId: 'r9',
+    assignedRouteName: 'Depot Route I',
+    routeType: 'simple',
+    status: 'inactive',
+    joinDate: '2017-04-30',
+    lastActive: '2026-04-15T11:30:00',
+    initials: 'CM',
+    avatarColor: '#ef4444',
+    experience: 9,
+  },
+  {
+    id: 'd10',
+    name: 'Lena Fischer',
+    age: 31,
+    licenseNumber: 'DL-2019-8823',
+    violations: { phone: 6, sunglasses: 3, drowsiness: 5, smoking: 4 },
+    totalViolations: 18,
+    safetyScore: 24,
+    rank: 10,
+    assignedRouteId: 'r10',
+    assignedRouteName: 'Restricted Route J',
+    routeType: 'simple',
+    status: 'suspended',
+    joinDate: '2019-08-11',
+    lastActive: '2026-04-10T09:00:00',
+    initials: 'LF',
+    avatarColor: '#dc2626',
+    experience: 7,
+  },
+];
+
+export const violations: Violation[] = [
+  { id: 'v1', driverId: 'd10', driverName: 'Lena Fischer', type: 'smoking', timestamp: '2026-04-18T09:15:00', location: 'Restricted Route J, KM 2.4', confidence: 94, status: 'flagged', route: 'Restricted Route J' },
+  { id: 'v2', driverId: 'd9', driverName: 'Carlos Mendez', type: 'drowsiness', timestamp: '2026-04-18T08:55:00', location: 'Depot Route I, KM 1.1', confidence: 89, status: 'flagged', route: 'Depot Route I' },
+  { id: 'v3', driverId: 'd8', driverName: 'Yuki Tanaka', type: 'phone', timestamp: '2026-04-18T08:40:00', location: 'Inner Ring Route H, KM 5.2', confidence: 97, status: 'pending', route: 'Inner Ring Route H' },
+  { id: 'v4', driverId: 'd7', driverName: 'Robert Walsh', type: 'phone', timestamp: '2026-04-18T08:20:00', location: 'Local Street Route G, KM 3.8', confidence: 91, status: 'pending', route: 'Local Street Route G' },
+  { id: 'v5', driverId: 'd6', driverName: 'Amina Hassan', type: 'drowsiness', timestamp: '2026-04-18T07:50:00', location: 'North District Line F, KM 7.0', confidence: 85, status: 'pending', route: 'North District Line F' },
+  { id: 'v6', driverId: 'd5', driverName: 'Daniel Kim', type: 'sunglasses', timestamp: '2026-04-18T07:30:00', location: 'Cross-Town Route E, KM 4.5', confidence: 88, status: 'reviewed', route: 'Cross-Town Route E' },
+  { id: 'v7', driverId: 'd10', driverName: 'Lena Fischer', type: 'drowsiness', timestamp: '2026-04-17T17:10:00', location: 'Restricted Route J, KM 1.2', confidence: 92, status: 'reviewed', route: 'Restricted Route J' },
+  { id: 'v8', driverId: 'd9', driverName: 'Carlos Mendez', type: 'phone', timestamp: '2026-04-17T16:45:00', location: 'Depot Route I, KM 0.8', confidence: 96, status: 'reviewed', route: 'Depot Route I' },
+  { id: 'v9', driverId: 'd4', driverName: 'Priya Sharma', type: 'phone', timestamp: '2026-04-17T15:30:00', location: 'Suburban Line D, KM 9.3', confidence: 90, status: 'reviewed', route: 'Suburban Line D' },
+  { id: 'v10', driverId: 'd8', driverName: 'Yuki Tanaka', type: 'drowsiness', timestamp: '2026-04-17T14:20:00', location: 'Inner Ring Route H, KM 2.6', confidence: 87, status: 'reviewed', route: 'Inner Ring Route H' },
+  { id: 'v11', driverId: 'd3', driverName: 'Marcus Johnson', type: 'drowsiness', timestamp: '2026-04-17T13:00:00', location: 'City Center Route C, KM 6.1', confidence: 82, status: 'reviewed', route: 'City Center Route C' },
+  { id: 'v12', driverId: 'd7', driverName: 'Robert Walsh', type: 'smoking', timestamp: '2026-04-17T11:40:00', location: 'Local Street Route G, KM 1.9', confidence: 93, status: 'reviewed', route: 'Local Street Route G' },
+  { id: 'v13', driverId: 'd10', driverName: 'Lena Fischer', type: 'phone', timestamp: '2026-04-17T10:55:00', location: 'Restricted Route J, KM 3.7', confidence: 98, status: 'reviewed', route: 'Restricted Route J' },
+  { id: 'v14', driverId: 'd5', driverName: 'Daniel Kim', type: 'drowsiness', timestamp: '2026-04-16T16:20:00', location: 'Cross-Town Route E, KM 8.2', confidence: 83, status: 'reviewed', route: 'Cross-Town Route E' },
+  { id: 'v15', driverId: 'd2', driverName: 'Sofia Alvarez', type: 'drowsiness', timestamp: '2026-04-16T14:00:00', location: 'Airport Shuttle Line B, KM 12.1', confidence: 79, status: 'reviewed', route: 'Airport Shuttle Line B' },
+  { id: 'v16', driverId: 'd1', driverName: 'James Carter', type: 'sunglasses', timestamp: '2026-04-15T11:10:00', location: 'Metro Express Line A, KM 18.4', confidence: 76, status: 'reviewed', route: 'Metro Express Line A' },
+  { id: 'v17', driverId: 'd6', driverName: 'Amina Hassan', type: 'phone', timestamp: '2026-04-15T09:30:00', location: 'North District Line F, KM 3.3', confidence: 94, status: 'reviewed', route: 'North District Line F' },
+  { id: 'v18', driverId: 'd9', driverName: 'Carlos Mendez', type: 'sunglasses', timestamp: '2026-04-14T15:50:00', location: 'Depot Route I, KM 2.0', confidence: 81, status: 'reviewed', route: 'Depot Route I' },
+];
+
+export const routes: Route[] = [
+  { id: 'r1', name: 'Metro Express Line A', from: 'Central Station', to: 'Northgate Terminal', distance: 28, difficulty: 'demanding', assignedDriverId: 'd1', assignedDriverName: 'James Carter', passengerCapacity: 80, dailyTrips: 12, description: 'High-frequency express route through the city center with multiple intersections and heavy traffic zones.', stops: 14, avgTravelTime: 65 },
+  { id: 'r2', name: 'Airport Shuttle Line B', from: 'City Hub', to: 'International Airport', distance: 35, difficulty: 'demanding', assignedDriverId: 'd2', assignedDriverName: 'Sofia Alvarez', passengerCapacity: 60, dailyTrips: 8, description: 'Long-distance shuttle connecting city center to airport, requiring precise scheduling and highway driving.', stops: 6, avgTravelTime: 55 },
+  { id: 'r3', name: 'City Center Route C', from: 'West Gate', to: 'East Terminal', distance: 22, difficulty: 'demanding', assignedDriverId: 'd3', assignedDriverName: 'Marcus Johnson', passengerCapacity: 70, dailyTrips: 15, description: 'Busy cross-city route through commercial districts with narrow streets and pedestrian zones.', stops: 20, avgTravelTime: 50 },
+  { id: 'r4', name: 'Suburban Line D', from: 'Downtown Park', to: 'Riverside Estate', distance: 18, difficulty: 'moderate', assignedDriverId: 'd4', assignedDriverName: 'Priya Sharma', passengerCapacity: 65, dailyTrips: 10, description: 'Suburban connector route with moderate traffic and residential stops.', stops: 16, avgTravelTime: 42 },
+  { id: 'r5', name: 'Cross-Town Route E', from: 'South Market', to: 'University Campus', distance: 15, difficulty: 'moderate', assignedDriverId: 'd5', assignedDriverName: 'Daniel Kim', passengerCapacity: 55, dailyTrips: 11, description: 'Mid-city route serving commercial and educational areas with mixed traffic.', stops: 12, avgTravelTime: 38 },
+  { id: 'r6', name: 'North District Line F', from: 'Old Town Square', to: 'Northern Mall', distance: 12, difficulty: 'moderate', assignedDriverId: 'd6', assignedDriverName: 'Amina Hassan', passengerCapacity: 50, dailyTrips: 9, description: 'Neighborhood route through northern residential areas with moderate passenger load.', stops: 10, avgTravelTime: 30 },
+  { id: 'r7', name: 'Local Street Route G', from: 'West Park', to: 'Community Center', distance: 8, difficulty: 'simple', assignedDriverId: 'd7', assignedDriverName: 'Robert Walsh', passengerCapacity: 40, dailyTrips: 7, description: 'Short local route through quiet residential streets with low traffic volume.', stops: 8, avgTravelTime: 25 },
+  { id: 'r8', name: 'Inner Ring Route H', from: 'Market Square', to: 'Hospital District', distance: 7, difficulty: 'simple', assignedDriverId: 'd8', assignedDriverName: 'Yuki Tanaka', passengerCapacity: 35, dailyTrips: 6, description: 'Short urban loop with minimal complexity, serving inner-city neighborhoods.', stops: 7, avgTravelTime: 22 },
+  { id: 'r9', name: 'Depot Route I', from: 'Bus Depot', to: 'Warehouse District', distance: 5, difficulty: 'simple', assignedDriverId: 'd9', assignedDriverName: 'Carlos Mendez', passengerCapacity: 30, dailyTrips: 5, description: 'Restricted industrial route with minimal passenger interaction and low complexity.', stops: 5, avgTravelTime: 18 },
+  { id: 'r10', name: 'Restricted Route J', from: 'Depot Gate', to: 'Parking Zone', distance: 3, difficulty: 'simple', assignedDriverId: 'd10', assignedDriverName: 'Lena Fischer', passengerCapacity: 0, dailyTrips: 2, description: 'Minimal-use restricted route for probationary or suspended drivers only.', stops: 3, avgTravelTime: 10 },
+];
+
+// Weekly violation trend data (last 7 days)
+export const weeklyViolationData = [
+  { day: 'Mon', phone: 2, sunglasses: 1, drowsiness: 3, smoking: 1, total: 7 },
+  { day: 'Tue', phone: 1, sunglasses: 2, drowsiness: 2, smoking: 0, total: 5 },
+  { day: 'Wed', phone: 3, sunglasses: 1, drowsiness: 4, smoking: 2, total: 10 },
+  { day: 'Thu', phone: 2, sunglasses: 0, drowsiness: 2, smoking: 1, total: 5 },
+  { day: 'Fri', phone: 4, sunglasses: 2, drowsiness: 3, smoking: 2, total: 11 },
+  { day: 'Sat', phone: 1, sunglasses: 1, drowsiness: 2, smoking: 0, total: 4 },
+  { day: 'Sun', phone: 3, sunglasses: 1, drowsiness: 1, smoking: 1, total: 6 },
+];
+
+// Monthly trend
+export const monthlyViolationData = [
+  { month: 'Oct', total: 28 },
+  { month: 'Nov', total: 35 },
+  { month: 'Dec', total: 22 },
+  { month: 'Jan', total: 40 },
+  { month: 'Feb', total: 31 },
+  { month: 'Mar', total: 27 },
+  { month: 'Apr', total: 18 },
+];
+
+export const violationBreakdown = [
+  { name: 'Phone Usage', value: 24, color: '#f97316' },
+  { name: 'Drowsiness', value: 19, color: '#ef4444' },
+  { name: 'Sunglasses', value: 11, color: '#eab308' },
+  { name: 'Smoking', value: 7, color: '#a855f7' },
+];
+
+// Live monitor feeds (simulated)
+export const liveFeeds = [
+  { id: 'cam1', driverId: 'd1', driverName: 'James Carter', route: 'Metro Express Line A', status: 'safe', speed: 42, location: 'Central Ave & 5th St', alert: null },
+  { id: 'cam2', driverId: 'd2', driverName: 'Sofia Alvarez', route: 'Airport Shuttle Line B', status: 'safe', speed: 78, location: 'Highway 101, KM 22', alert: null },
+  { id: 'cam3', driverId: 'd3', driverName: 'Marcus Johnson', route: 'City Center Route C', status: 'safe', speed: 35, location: 'Market Street & 3rd Ave', alert: null },
+  { id: 'cam4', driverId: 'd8', driverName: 'Yuki Tanaka', route: 'Inner Ring Route H', status: 'alert', speed: 28, location: 'Hospital Drive, KM 3.1', alert: 'drowsiness' },
+  { id: 'cam5', driverId: 'd7', driverName: 'Robert Walsh', route: 'Local Street Route G', status: 'warning', speed: 31, location: 'Park Road, KM 1.8', alert: 'phone' },
+  { id: 'cam6', driverId: 'd5', driverName: 'Daniel Kim', route: 'Cross-Town Route E', status: 'safe', speed: 45, location: 'University Blvd, KM 7.4', alert: null },
+];
