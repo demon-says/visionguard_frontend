@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon, Bell, Shield, Brain, Camera,
   Sliders, Save, RefreshCw, ChevronRight, Info, Loader2,
-  Banknote
+  Banknote, Bus, ArrowRightLeft
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useAllSettings, useUpdateDetectionSettings,
   useUpdateRouteThresholds, useUpdateNotifications, useUpdateCamera,
-  useUpdateFineAmounts,
+  useUpdateFineAmounts, useRoutes, useDrivers, useReassignDriver,
 } from '../api/hooks';
 import type { DetectionSetting, RouteThreshold, NotificationSettings, CameraSettings, SystemInfo, FineAmount } from '../api/types';
 
@@ -54,6 +54,153 @@ const routeTypeColors: Record<string, string> = {
   moderate: '#3b82f6',
   simple: '#6b7280',
 };
+
+const difficultyLabels: Record<string, string> = {
+  demanding: 'Demanding',
+  moderate: 'Moderate',
+  simple: 'Simple',
+};
+
+// ── Active Assignments sub-component ──────────────────────
+function ActiveAssignments() {
+  const { data: routesRes, loading: loadingRoutes, refetch: refetchRoutes } = useRoutes();
+  const { data: driversRes, loading: loadingDrivers } = useDrivers({ status: 'active', limit: 100 });
+  const { reassign, loading: reassigning } = useReassignDriver();
+  const [reassigningId, setReassigningId] = useState<string | null>(null);
+
+  const routes = routesRes?.data || [];
+  const allDrivers = driversRes?.data || [];
+
+  const handleReassign = async (routeId: string, busId: string, newDriverId: string) => {
+    if (!newDriverId) return;
+    setReassigningId(routeId);
+    try {
+      await reassign(routeId, newDriverId, busId);
+      toast.success('Driver reassigned successfully');
+      refetchRoutes();
+    } catch {
+      toast.error('Failed to reassign driver');
+    } finally {
+      setReassigningId(null);
+    }
+  };
+
+  if (loadingRoutes || loadingDrivers) {
+    return (
+      <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height: 200 }} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <ArrowRightLeft size={18} color="#6366f1" />
+        <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>Active Assignments</div>
+      </div>
+      <div style={{ color: '#475569', fontSize: 12, marginBottom: 16 }}>
+        Assign which driver is linked to each bus / source camera. AI violations are routed to the assigned driver.
+      </div>
+
+      {routes.length === 0 ? (
+        <div className="text-center py-8">
+          <Bus size={28} color="#475569" className="mx-auto mb-2" />
+          <div style={{ color: '#475569', fontSize: 13 }}>No routes with bus assignments found.</div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {routes.map(route => {
+            const dc = routeTypeColors[route.difficulty] || '#6b7280';
+            const isProcessing = reassigningId === route.id;
+            return (
+              <div
+                key={route.id}
+                className="p-4 rounded-xl flex flex-wrap items-center gap-4"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+              >
+                {/* Bus info */}
+                <div className="flex items-center gap-3 min-w-[140px]">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.1)' }}>
+                    <Bus size={18} color="#a5b4fc" />
+                  </div>
+                  <div>
+                    <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{route.bus_number || 'No Bus'}</div>
+                    <div style={{ color: '#475569', fontSize: 11 }}>Source: {(route as any).source_id || '–'}</div>
+                  </div>
+                </div>
+
+                {/* Route */}
+                <div className="min-w-[120px]">
+                  <div style={{ color: '#94a3b8', fontSize: 11 }}>Route</div>
+                  <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{route.name}</div>
+                  <span className="inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-semibold" style={{ background: `${dc}15`, color: dc }}>
+                    {difficultyLabels[route.difficulty] || route.difficulty}
+                  </span>
+                </div>
+
+                {/* Arrow */}
+                <div className="hidden sm:flex items-center">
+                  <ArrowRightLeft size={16} color="#475569" />
+                </div>
+
+                {/* Driver selector */}
+                <div className="flex-1 min-w-[200px]">
+                  <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>Assigned Driver</div>
+                  <div className="relative">
+                    <select
+                      value={route.driver_id || ''}
+                      onChange={e => handleReassign(route.id, route.bus_id, e.target.value)}
+                      disabled={isProcessing || !route.bus_id}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm font-semibold appearance-none cursor-pointer transition-all outline-none disabled:opacity-50"
+                      style={{
+                        background: 'rgba(99,102,241,0.08)',
+                        color: '#f1f5f9',
+                        border: '1px solid rgba(99,102,241,0.2)',
+                        paddingRight: 36,
+                      }}
+                    >
+                      <option value="" style={{ background: '#111827', color: '#64748b' }}>— Unassigned —</option>
+                      {allDrivers.map(d => (
+                        <option key={d.id} value={d.id} style={{ background: '#111827', color: '#f1f5f9' }}>
+                          {d.name} (Score: {d.safety_score} · #{d.rank})
+                        </option>
+                      ))}
+                    </select>
+                    {isProcessing && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <Loader2 size={14} className="animate-spin" color="#6366f1" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Current driver badge */}
+                {route.driver_name && (
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold"
+                      style={{
+                        background: `${route.driver_avatar_color || '#6366f1'}25`,
+                        color: route.driver_avatar_color || '#6366f1',
+                      }}
+                    >
+                      {route.driver_initials || '??'}
+                    </div>
+                    <div>
+                      <div style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>{route.driver_name}</div>
+                      <div style={{ color: '#475569', fontSize: 10 }}>Score: {route.driver_safety_score ?? '–'}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Settings() {
   // Load all settings from API
@@ -243,6 +390,9 @@ export default function Settings() {
           })}
         </div>
       </div>
+
+      {/* Active Assignments — Reassign drivers to buses */}
+      <ActiveAssignments />
 
       {/* Route Assignment Settings */}
       <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>

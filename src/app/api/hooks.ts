@@ -505,3 +505,33 @@ export function useUpdateFineAmounts() {
   };
   return { update, loading };
 }
+
+// ─────────────────────────────────────────────────────────────
+// ASSIGNMENT HOOKS
+// ─────────────────────────────────────────────────────────────
+
+export function useReassignDriver() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reassign = async (routeId: string, driverId: string, busId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.patch<ApiResponse<{ assignmentId: string }>>(
+        `/api/routes/${routeId}/assign`,
+        { driverId, busId },
+      );
+      return result;
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to reassign driver';
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { reassign, loading, error };
+}
+
