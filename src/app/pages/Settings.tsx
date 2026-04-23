@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon, Bell, Shield, Brain, Camera,
-  Sliders, Save, RefreshCw, ChevronRight, Info, Loader2
+  Sliders, Save, RefreshCw, ChevronRight, Info, Loader2,
+  Banknote
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useAllSettings, useUpdateDetectionSettings,
   useUpdateRouteThresholds, useUpdateNotifications, useUpdateCamera,
+  useUpdateFineAmounts,
 } from '../api/hooks';
-import type { DetectionSetting, RouteThreshold, NotificationSettings, CameraSettings, SystemInfo } from '../api/types';
+import type { DetectionSetting, RouteThreshold, NotificationSettings, CameraSettings, SystemInfo, FineAmount } from '../api/types';
 
 const Toggle = ({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) => (
   <button onClick={onToggle} className="relative w-11 h-6 rounded-full transition-all" style={{ background: enabled ? '#6366f1' : 'rgba(255,255,255,0.1)' }}>
@@ -60,8 +62,9 @@ export default function Settings() {
   const { update: saveThresholds, loading: savingThresholds } = useUpdateRouteThresholds();
   const { update: saveNotifications, loading: savingNotifications } = useUpdateNotifications();
   const { update: saveCamera, loading: savingCamera } = useUpdateCamera();
+  const { update: saveFineAmounts, loading: savingFines } = useUpdateFineAmounts();
 
-  const saving = savingDetection || savingThresholds || savingNotifications || savingCamera;
+  const saving = savingDetection || savingThresholds || savingNotifications || savingCamera || savingFines;
 
   // Local state initialized from API
   const [detections, setDetections] = useState<DetectionSetting[]>([]);
@@ -73,6 +76,7 @@ export default function Settings() {
     resolution: '1080p', frame_rate: 30, retention_days: 30, capture_on_detection: true,
   });
   const [system, setSystem] = useState<SystemInfo | null>(null);
+  const [fineAmounts, setFineAmounts] = useState<FineAmount[]>([]);
 
   // Populate state from API
   useEffect(() => {
@@ -83,6 +87,7 @@ export default function Settings() {
       if (d.notifications) setNotifications(d.notifications);
       if (d.camera) setCamera(d.camera);
       if (d.system) setSystem(d.system);
+      if (d.fineAmounts?.length) setFineAmounts(d.fineAmounts);
     }
   }, [settingsRes]);
 
@@ -93,6 +98,7 @@ export default function Settings() {
         saveThresholds(thresholds),
         saveNotifications(notifications),
         saveCamera(camera),
+        saveFineAmounts(fineAmounts),
       ]);
       toast.success('Settings saved successfully');
       refetch();
@@ -192,6 +198,45 @@ export default function Settings() {
                   <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)', width: 100 }}>
                     <div className="h-full rounded-full" style={{ width: `${mod.confidence_threshold}%`, background: color }} />
                   </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Fine Amounts */}
+      <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-2 mb-4">
+          <Banknote size={18} color="#eab308" />
+          <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>Fine Amounts</div>
+        </div>
+        <div style={{ color: '#475569', fontSize: 12, marginBottom: 16 }}>Configure the fine amount (PKR) for each violation type. Drivers with &gt;10 violations receive fines; others receive warnings.</div>
+        <div className="grid md:grid-cols-2 gap-4">
+          {fineAmounts.map((fa, idx) => {
+            const color = moduleColors[fa.violation_type] || '#6366f1';
+            return (
+              <div key={fa.violation_type} className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-3 h-3 rounded-full" style={{ background: color }} />
+                  <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>
+                    {moduleLabels[fa.violation_type] || fa.violation_type}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span style={{ color: '#64748b', fontSize: 14, fontWeight: 600 }}>PKR</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={fa.amount}
+                    onChange={e => {
+                      const next = [...fineAmounts];
+                      next[idx] = { ...next[idx], amount: Number(e.target.value) };
+                      setFineAmounts(next);
+                    }}
+                    className="w-32 px-3 py-2 rounded-lg text-center font-bold text-lg bg-transparent outline-none"
+                    style={{ color: color, border: `1px solid ${color}40` }}
+                  />
                 </div>
               </div>
             );

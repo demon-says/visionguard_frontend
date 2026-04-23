@@ -28,6 +28,8 @@ import type {
   CameraSettings,
   AiStatus,
   AiConfig,
+  FineAmount,
+  PenaltyResult,
 } from './types';
 
 // ── Generic fetch hook ─────────────────────────────────────
@@ -439,5 +441,67 @@ export function useUpdateDriverStatus() {
     }
   };
 
+  return { update, loading };
+}
+
+// ─────────────────────────────────────────────────────────────
+// PENALTY HOOKS
+// ─────────────────────────────────────────────────────────────
+
+// Issue a penalty on a single violation
+export function useIssuePenalty() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const issue = async (violationId: string, issuedBy?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.post<ApiResponse<PenaltyResult>>(
+        `/api/penalties/${violationId}`,
+        { issuedBy: issuedBy || 'Admin' },
+      );
+      return result;
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to issue penalty';
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { issue, loading, error };
+}
+
+// Paginated list of penalties for a specific driver
+export function useDriverPenalties(
+  driverId: string | undefined,
+  filters?: { page?: number; limit?: number },
+) {
+  return useApi<PaginatedResponse<ViolationDetail>>(
+    () => api.get(`/api/penalties/driver/${driverId}`, filters as Record<string, unknown>),
+    [driverId, filters?.page, filters?.limit],
+  );
+}
+
+// Fine amounts (for settings page)
+export function useFineAmounts() {
+  return useApi<ApiResponse<FineAmount[]>>(
+    () => api.get('/api/fine-amounts'),
+    [],
+  );
+}
+
+export function useUpdateFineAmounts() {
+  const [loading, setLoading] = useState(false);
+  const update = async (amounts: FineAmount[]) => {
+    setLoading(true);
+    try {
+      return await api.put<ApiResponse<FineAmount[]>>('/api/fine-amounts', amounts);
+    } finally {
+      setLoading(false);
+    }
+  };
   return { update, loading };
 }

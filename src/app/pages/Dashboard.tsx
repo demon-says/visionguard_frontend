@@ -6,7 +6,8 @@ import {
 } from 'recharts';
 import {
   Users, AlertTriangle, ShieldCheck, TrendingDown, TrendingUp,
-  Phone, Glasses, Brain, Cigarette, ArrowRight, Clock, Map, Loader2
+  Phone, Glasses, Brain, Cigarette, ArrowRight, Clock, Map, Loader2,
+  Banknote, Gavel
 } from 'lucide-react';
 import { VIOLATION_COLORS, VIOLATION_LABELS } from '../data/constants';
 import {
@@ -116,9 +117,11 @@ export default function Dashboard() {
   return (
     <div className="p-6 space-y-6">
       {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {summaryLoading ? (
           <>
+            <LoadingSkeleton height={140} />
+            <LoadingSkeleton height={140} />
             <LoadingSkeleton height={140} />
             <LoadingSkeleton height={140} />
             <LoadingSkeleton height={140} />
@@ -139,6 +142,20 @@ export default function Dashboard() {
               value={summary?.total_violations ?? 0}
               sub={`${summary?.pending_violations ?? 0} pending review`}
               color="#ef4444"
+            />
+            <StatCard
+              icon={Gavel}
+              label="Fines Issued"
+              value={summary?.total_fines_issued ?? 0}
+              sub={`${summary?.total_warnings_issued ?? 0} warnings`}
+              color="#f97316"
+            />
+            <StatCard
+              icon={Banknote}
+              label="Total Fine Value"
+              value={`PKR ${Number(summary?.total_fines_value ?? 0).toLocaleString()}`}
+              sub="all time"
+              color="#eab308"
             />
             <StatCard
               icon={ShieldCheck}

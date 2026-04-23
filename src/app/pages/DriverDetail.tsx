@@ -1,15 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, Link } from 'react-router';
 import {
   ArrowLeft, Shield, AlertTriangle, Phone, Glasses, Brain,
-  Cigarette, Map, Calendar, Hash, Clock, TrendingUp, Award, Loader2
+  Cigarette, Map, Calendar, Hash, Clock, TrendingUp, Award, Loader2,
+  Gavel, X, Banknote
 } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell
 } from 'recharts';
-import { VIOLATION_COLORS, VIOLATION_LABELS, ROUTE_COLORS, ROUTE_LABELS } from '../data/constants';
-import { useDriver } from '../api/hooks';
+import { toast } from 'sonner';
+import { VIOLATION_COLORS, VIOLATION_LABELS, ROUTE_COLORS, ROUTE_LABELS, FINE_AMOUNTS, FINE_THRESHOLD } from '../data/constants';
+import { useDriver, useIssuePenalty } from '../api/hooks';
 
 const safetyColor = (score: number) => {
   if (score >= 80) return '#10b981';
@@ -31,9 +33,123 @@ const LoadingSkeleton = ({ height = 200 }: { height?: number }) => (
   <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height }} />
 );
 
+// Penalty badge (reused from Violations)
+function PenaltyBadge({ penalty_type, fine_amount }: {
+  penalty_type?: string | null;
+  fine_amount?: number | null;
+}) {
+  if (!penalty_type) return null;
+  if (penalty_type === 'fine') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+        style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+      >
+        Fine · PKR {Number(fine_amount).toLocaleString()}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+      style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}
+    >
+      Warning
+    </span>
+  );
+}
+
+// Penalty confirmation dialog
+function PenaltyConfirmDialog({
+  violation,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  violation: { id: string; driver_name: string; violation_type: string };
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const fineAmount = FINE_AMOUNTS[violation.violation_type] ?? 0;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-2xl p-6 max-w-md w-full mx-4"
+        style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.1)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.15)' }}>
+              <Gavel size={20} color="#f59e0b" />
+            </div>
+            <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 16 }}>Issue Penalty</div>
+          </div>
+          <button onClick={onCancel} className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-80" style={{ background: 'rgba(255,255,255,0.05)' }}>
+            <X size={16} color="#64748b" />
+          </button>
+        </div>
+        <div className="space-y-3 mb-6">
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>Driver</div>
+            <div style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 600 }}>{violation.driver_name}</div>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>Violation Type</div>
+            <div style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 600 }}>{VIOLATION_LABELS[violation.violation_type] || violation.violation_type}</div>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>Potential Fine Amount</div>
+            <div style={{ color: '#ef4444', fontSize: 18, fontWeight: 700 }}>PKR {fineAmount.toLocaleString()}</div>
+            <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+              Fine is issued if driver has &gt;{FINE_THRESHOLD} total violations. Otherwise, a warning is issued.
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80" style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.08)' }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} disabled={loading} className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 disabled:opacity-50" style={{ background: 'rgba(245,158,11,0.2)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>
+            {loading ? 'Processing...' : 'Confirm Penalty'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DriverDetail() {
   const { id } = useParams<{ id: string }>();
-  const { data: result, loading, error } = useDriver(id);
+  const { data: result, loading, error, refetch } = useDriver(id);
+  const { issue: issuePenalty, loading: issuingPenalty } = useIssuePenalty();
+
+  // Penalty dialog state
+  const [penaltyTarget, setPenaltyTarget] = useState<{
+    id: string; driver_name: string; violation_type: string;
+  } | null>(null);
+
+  const handleIssuePenalty = async () => {
+    if (!penaltyTarget) return;
+    try {
+      const res = await issuePenalty(penaltyTarget.id, 'Admin');
+      const msg = res?.data?.message || 'Penalty issued successfully';
+      if (res?.data?.penaltyType === 'fine') {
+        toast.success(msg);
+      } else {
+        toast.info(msg);
+      }
+      setPenaltyTarget(null);
+      refetch();
+    } catch {
+      toast.error('Failed to issue penalty');
+    }
+  };
 
   if (loading) {
     return (
@@ -87,8 +203,22 @@ export default function DriverDetail() {
     { name: 'Smoking', value: driver.smoking_violations, color: VIOLATION_COLORS.smoking },
   ];
 
+  // Fine display
+  const hasFines = (driver.total_fines_count ?? 0) > 0;
+  const hasWarnings = (driver.total_warnings_count ?? 0) > 0;
+
   return (
     <div className="p-6 space-y-5">
+      {/* Penalty confirmation dialog */}
+      {penaltyTarget && (
+        <PenaltyConfirmDialog
+          violation={penaltyTarget}
+          onConfirm={handleIssuePenalty}
+          onCancel={() => setPenaltyTarget(null)}
+          loading={issuingPenalty}
+        />
+      )}
+
       {/* Back */}
       <Link
         to="/drivers"
@@ -145,16 +275,25 @@ export default function DriverDetail() {
               {driver.license_number} • {driver.experience_years || 0} years experience
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
               {[
                 { label: 'Safety Score', value: `${driver.safety_score}%`, color: scoreColor },
                 { label: 'Global Rank', value: `#${driver.rank}`, color: '#6366f1' },
                 { label: 'Total Violations', value: driver.total_violations, color: '#f97316' },
+                {
+                  label: 'Total Fines',
+                  value: `PKR ${Number(driver.total_fines_value ?? 0).toLocaleString()}`,
+                  color: hasFines ? '#ef4444' : '#475569',
+                  sub: hasFines || hasWarnings
+                    ? `${driver.total_fines_count ?? 0} fine(s) · ${driver.total_warnings_count ?? 0} warning(s)`
+                    : 'No penalties',
+                },
                 { label: 'Member Since', value: driver.join_date ? new Date(driver.join_date).getFullYear() : '–', color: '#06b6d4' },
               ].map(item => (
                 <div key={item.label} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
                   <div style={{ color: '#475569', fontSize: 11 }}>{item.label}</div>
-                  <div style={{ color: item.color, fontWeight: 700, fontSize: 20 }}>{item.value}</div>
+                  <div style={{ color: item.color, fontWeight: 700, fontSize: item.label === 'Total Fines' ? 16 : 20 }}>{item.value}</div>
+                  {(item as any).sub && <div style={{ color: '#475569', fontSize: 10, marginTop: 2 }}>{(item as any).sub}</div>}
                 </div>
               ))}
             </div>
@@ -304,6 +443,7 @@ export default function DriverDetail() {
                 const statusColors: Record<string, string> = {
                   pending: '#f59e0b', reviewed: '#10b981', flagged: '#ef4444',
                 };
+                const hasPenalty = !!(v as any).penalty_type;
                 return (
                   <div
                     key={v.id}
@@ -319,17 +459,39 @@ export default function DriverDetail() {
                           <div style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>
                             {VIOLATION_LABELS[v.violation_type] || v.violation_label}
                           </div>
-                          <span
-                            className="px-1.5 py-0.5 rounded text-xs"
-                            style={{ background: `${statusColors[v.status] || '#6366f1'}15`, color: statusColors[v.status] || '#6366f1' }}
-                          >
-                            {v.status}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="px-1.5 py-0.5 rounded text-xs"
+                              style={{ background: `${statusColors[v.status] || '#6366f1'}15`, color: statusColors[v.status] || '#6366f1' }}
+                            >
+                              {v.status}
+                            </span>
+                            {/* Issue Penalty button */}
+                            <button
+                              onClick={() => setPenaltyTarget({
+                                id: v.id,
+                                driver_name: driver.name,
+                                violation_type: v.violation_type,
+                              })}
+                              disabled={hasPenalty}
+                              className="w-6 h-6 rounded flex items-center justify-center transition-all hover:opacity-80 disabled:opacity-30"
+                              style={{
+                                background: hasPenalty ? 'rgba(255,255,255,0.03)' : 'rgba(245,158,11,0.1)',
+                                color: hasPenalty ? '#475569' : '#f59e0b',
+                              }}
+                              title={hasPenalty ? 'Penalty already issued' : 'Issue Penalty'}
+                            >
+                              <Gavel size={10} />
+                            </button>
+                          </div>
                         </div>
                         <div style={{ color: '#64748b', fontSize: 11 }}>{v.detection_date} at {v.start_time}</div>
                         <div className="flex items-center justify-between mt-1">
-                          <div style={{ color: '#475569', fontSize: 11 }}>
-                            {v.detection_date ? new Date(v.detection_date).toLocaleDateString() : ''}
+                          <div className="flex items-center gap-2">
+                            <div style={{ color: '#475569', fontSize: 11 }}>
+                              {v.detection_date ? new Date(v.detection_date).toLocaleDateString() : ''}
+                            </div>
+                            <PenaltyBadge penalty_type={(v as any).penalty_type} fine_amount={(v as any).fine_amount} />
                           </div>
                           {v.confidence && (
                             <div style={{ color: color, fontSize: 11, fontWeight: 600 }}>{v.confidence}% conf.</div>

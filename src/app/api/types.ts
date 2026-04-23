@@ -40,6 +40,10 @@ export interface DashboardSummary {
   pending_violations: number;
   flagged_violations: number;
   reviewed_violations: number;
+  // Fine aggregates
+  total_fines_issued: number;
+  total_warnings_issued: number;
+  total_fines_value: number;
 }
 
 export interface WeeklyTrendItem {
@@ -82,6 +86,10 @@ export interface DriverStats {
   experience_years: number;
   join_date: string;
   last_active: string;
+  // Fine summary
+  total_fines_count: number;
+  total_warnings_count: number;
+  total_fines_value: number;
 }
 
 export interface DriverProfile extends DriverStats {
@@ -112,6 +120,11 @@ export interface ViolationDetail {
   notes?: string;
   reviewed_by?: string;
   reviewed_at?: string;
+  // Penalty fields
+  penalty_type?: 'fine' | 'warning' | null;
+  fine_amount?: number | null;
+  penalty_issued_at?: string | null;
+  penalty_issued_by?: string | null;
 }
 
 export interface RecentViolation {
@@ -128,6 +141,7 @@ export interface RecentViolation {
   start_time: string;
   image_url: string;
   bus_number: string;
+  penalty_type?: 'fine' | 'warning' | null;
 }
 
 // ── Routes ─────────────────────────────────────────────────
@@ -236,6 +250,23 @@ export interface AllSettings {
   notifications: NotificationSettings;
   camera: CameraSettings;
   system: SystemInfo;
+  fineAmounts: FineAmount[];
+}
+
+// ── Fines / Penalties ─────────────────────────────────────
+
+export interface FineAmount {
+  id?: string;
+  violation_type: string;
+  amount: number;
+  updated_at?: string;
+}
+
+export interface PenaltyResult {
+  penaltyType: 'fine' | 'warning';
+  fineAmount: number | null;
+  violationCount: number;
+  message: string;
 }
 
 // ── AI ─────────────────────────────────────────────────────

@@ -3,11 +3,12 @@ import { Link } from 'react-router';
 import {
   Search, Filter, AlertTriangle, CheckCircle, Flag,
   Phone, Glasses, Brain, Cigarette, SlidersHorizontal,
-  Download, RefreshCw, Eye, ChevronLeft, ChevronRight
+  Download, RefreshCw, Eye, ChevronLeft, ChevronRight,
+  Gavel, X
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { VIOLATION_COLORS, VIOLATION_LABELS } from '../data/constants';
-import { useViolations, useUpdateViolation } from '../api/hooks';
+import { VIOLATION_COLORS, VIOLATION_LABELS, FINE_AMOUNTS, FINE_THRESHOLD } from '../data/constants';
+import { useViolations, useUpdateViolation, useIssuePenalty } from '../api/hooks';
 
 const violationIcons: Record<string, any> = {
   phone: Phone,
@@ -28,23 +29,140 @@ const LoadingSkeleton = ({ height = 48 }: { height?: number }) => (
   <div className="animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', height }} />
 );
 
+// Penalty badge component
+function PenaltyBadge({ penalty_type, fine_amount }: {
+  penalty_type?: string | null;
+  fine_amount?: number | null;
+}) {
+  if (!penalty_type) {
+    return <span style={{ color: '#475569', fontSize: 11 }}>—</span>;
+  }
+  if (penalty_type === 'fine') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+        style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+      >
+        Fine · PKR {Number(fine_amount).toLocaleString()}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+      style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}
+    >
+      Warning
+    </span>
+  );
+}
+
+// Confirmation dialog
+function PenaltyConfirmDialog({
+  violation,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  violation: { id: string; driver_name: string; violation_type: string; total_violations?: number };
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  // We don't have exact violation count in list view, so show the fine amount preview
+  const fineAmount = FINE_AMOUNTS[violation.violation_type] ?? 0;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-2xl p-6 max-w-md w-full mx-4"
+        style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.1)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.15)' }}>
+              <Gavel size={20} color="#f59e0b" />
+            </div>
+            <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 16 }}>Issue Penalty</div>
+          </div>
+          <button
+            onClick={onCancel}
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-80 transition-all"
+            style={{ background: 'rgba(255,255,255,0.05)' }}
+          >
+            <X size={16} color="#64748b" />
+          </button>
+        </div>
+
+        <div className="space-y-3 mb-6">
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>Driver</div>
+            <div style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 600 }}>{violation.driver_name}</div>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>Violation Type</div>
+            <div style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 600 }}>{VIOLATION_LABELS[violation.violation_type] || violation.violation_type}</div>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>Potential Fine Amount</div>
+            <div style={{ color: '#ef4444', fontSize: 18, fontWeight: 700 }}>PKR {fineAmount.toLocaleString()}</div>
+            <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+              Fine is issued if driver has &gt;{FINE_THRESHOLD} total violations. Otherwise, a warning is issued.
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
+            style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+            style={{ background: 'rgba(245,158,11,0.2)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}
+          >
+            {loading ? 'Processing...' : 'Confirm Penalty'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Violations() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [penaltyFilter, setPenaltyFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
   const limit = 20;
+
+  // Penalty confirmation dialog state
+  const [penaltyTarget, setPenaltyTarget] = useState<{
+    id: string; driver_name: string; violation_type: string;
+  } | null>(null);
 
   const filters = useMemo(() => ({
     type: filterType !== 'all' ? filterType : undefined,
     status: filterStatus !== 'all' ? filterStatus : undefined,
     driverName: search || undefined,
+    penaltyFilter: penaltyFilter !== 'all' ? penaltyFilter : undefined,
     page,
     limit,
-  }), [filterType, filterStatus, search, page, limit]);
+  }), [filterType, filterStatus, search, penaltyFilter, page, limit]);
 
   const { data: result, loading, refetch } = useViolations(filters);
   const { update: updateViolation, loading: updating } = useUpdateViolation();
+  const { issue: issuePenalty, loading: issuingPenalty } = useIssuePenalty();
 
   const violations = result?.data || [];
   const meta = result?.meta;
@@ -60,11 +178,38 @@ export default function Violations() {
     }
   };
 
+  const handleIssuePenalty = async () => {
+    if (!penaltyTarget) return;
+    try {
+      const res = await issuePenalty(penaltyTarget.id, 'Admin');
+      const msg = res?.data?.message || 'Penalty issued successfully';
+      if (res?.data?.penaltyType === 'fine') {
+        toast.success(msg);
+      } else {
+        toast.info(msg);
+      }
+      setPenaltyTarget(null);
+      refetch();
+    } catch {
+      toast.error('Failed to issue penalty');
+    }
+  };
+
   // Compute counts from current page data (approximate)
   const totalCount = meta?.total ?? violations.length;
 
   return (
     <div className="p-6 space-y-5">
+      {/* Penalty confirmation dialog */}
+      {penaltyTarget && (
+        <PenaltyConfirmDialog
+          violation={penaltyTarget}
+          onConfirm={handleIssuePenalty}
+          onCancel={() => setPenaltyTarget(null)}
+          loading={issuingPenalty}
+        />
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
@@ -163,6 +308,29 @@ export default function Violations() {
             })}
           </div>
 
+          {/* Penalty filter */}
+          <div className="flex gap-1">
+            {[
+              { key: 'all', label: 'All Penalties' },
+              { key: 'fined', label: 'Fined' },
+              { key: 'warning', label: 'Warning' },
+              { key: 'none', label: 'No Penalty' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => { setPenaltyFilter(key); setPage(1); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: penaltyFilter === key ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.04)',
+                  color: penaltyFilter === key ? '#f59e0b' : '#64748b',
+                  border: penaltyFilter === key ? '1px solid rgba(245,158,11,0.4)' : '1px solid transparent',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div style={{ color: '#475569', fontSize: 12 }}>
             Showing {violations.length} of {totalCount}
           </div>
@@ -173,7 +341,7 @@ export default function Violations() {
           <table className="w-full">
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                {['Type', 'Driver', 'Route', 'Date & Time', 'Confidence', 'Status', 'Actions'].map(h => (
+                {['Type', 'Driver', 'Route', 'Date & Time', 'Confidence', 'Status', 'Penalty', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3" style={{ color: '#475569', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -183,13 +351,14 @@ export default function Violations() {
             <tbody>
               {loading ? (
                 Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}><td colSpan={7} className="px-4 py-3"><LoadingSkeleton height={48} /></td></tr>
+                  <tr key={i}><td colSpan={8} className="px-4 py-3"><LoadingSkeleton height={48} /></td></tr>
                 ))
               ) : violations.map((v, i) => {
                 const Icon = violationIcons[v.violation_type] || AlertTriangle;
                 const color = VIOLATION_COLORS[v.violation_type] || '#6366f1';
                 const sc = statusConfig[v.status as keyof typeof statusConfig] || statusConfig.pending;
                 const StatusIcon = sc.icon;
+                const hasPenalty = !!v.penalty_type;
                 return (
                   <tr
                     key={v.id}
@@ -259,6 +428,11 @@ export default function Violations() {
                       </div>
                     </td>
 
+                    {/* Penalty */}
+                    <td className="px-4 py-3">
+                      <PenaltyBadge penalty_type={v.penalty_type} fine_amount={v.fine_amount} />
+                    </td>
+
                     {/* Actions */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
@@ -281,6 +455,19 @@ export default function Violations() {
                             <CheckCircle size={12} />
                           </button>
                         )}
+                        {/* Issue Penalty button */}
+                        <button
+                          onClick={() => setPenaltyTarget({ id: v.id, driver_name: v.driver_name, violation_type: v.violation_type })}
+                          disabled={hasPenalty}
+                          className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80 disabled:opacity-30"
+                          style={{
+                            background: hasPenalty ? 'rgba(255,255,255,0.03)' : 'rgba(245,158,11,0.1)',
+                            color: hasPenalty ? '#475569' : '#f59e0b',
+                          }}
+                          title={hasPenalty ? 'Penalty already issued' : 'Issue Penalty'}
+                        >
+                          <Gavel size={12} />
+                        </button>
                       </div>
                     </td>
                   </tr>

@@ -42,3 +42,15 @@ export const ROUTE_LABELS: Record<RouteType, string> = {
   moderate: 'Moderate',
   simple: 'Simple',
 };
+
+// Fine amounts for display (mirrors DB seed — used for offline/fallback UI display only)
+export const FINE_AMOUNTS: Record<string, number> = {
+  mobile:     10000,
+  drowsy:     12000,
+  smoking:     8000,
+  sunglasses:  6000,
+};
+
+export const FINE_THRESHOLD = 10; // violations > this → fine eligible
+
+export type PenaltyType = 'fine' | 'warning';
