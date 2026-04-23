@@ -151,7 +151,7 @@ export function Layout() {
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto overflow-x-hidden">
           {navItems.map(({ to, icon: Icon, label, exact }) => (
             <NavLink
               key={to}
