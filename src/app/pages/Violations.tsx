@@ -341,7 +341,7 @@ export default function Violations() {
           <table className="w-full">
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                {['Type', 'Driver', 'Route', 'Date & Time', 'Confidence', 'Status', 'Penalty', 'Actions'].map(h => (
+                {['Type', 'Driver', 'Route', 'Date & Time', 'Status', 'Penalty', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3" style={{ color: '#475569', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -350,8 +350,8 @@ export default function Violations() {
             </thead>
             <tbody>
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}><td colSpan={8} className="px-4 py-3"><LoadingSkeleton height={48} /></td></tr>
+                Array.from({ length: 7 }).map((_, i) => (
+                  <tr key={i}><td colSpan={7} className="px-4 py-3"><LoadingSkeleton height={48} /></td></tr>
                 ))
               ) : violations.map((v, i) => {
                 const Icon = violationIcons[v.violation_type] || AlertTriangle;
@@ -404,21 +404,6 @@ export default function Violations() {
                       </div>
                     </td>
 
-                    {/* Confidence */}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${v.confidence || 0}%`,
-                              background: (v.confidence || 0) >= 90 ? '#10b981' : (v.confidence || 0) >= 80 ? '#f59e0b' : '#ef4444',
-                            }}
-                          />
-                        </div>
-                        <span style={{ color: '#94a3b8', fontSize: 12 }}>{v.confidence || '–'}%</span>
-                      </div>
-                    </td>
 
                     {/* Status */}
                     <td className="px-4 py-3">
