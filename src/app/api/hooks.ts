@@ -201,8 +201,9 @@ export interface ViolationFilters {
 }
 
 export function useViolations(filters: ViolationFilters) {
-  return useApi<PaginatedResponse<ViolationDetail>>(
+  return usePolledApi<PaginatedResponse<ViolationDetail>>(
     () => api.get('/api/violations', filters as Record<string, unknown>),
+    10_000,
     [filters.type, filters.status, filters.driverName, filters.dateFrom, filters.dateTo, filters.page, filters.limit],
   );
 }
