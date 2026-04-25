@@ -103,11 +103,11 @@ function usePolledApi<T>(
 // DASHBOARD HOOKS
 // ─────────────────────────────────────────────────────────────
 
-// Polled version for dashboard and layout (30s auto-refresh)
+// Polled version for dashboard and layout (10s auto-refresh)
 export function useDashboardSummaryPolled() {
   return usePolledApi<ApiResponse<DashboardSummary>>(
     () => api.get('/api/dashboard/summary'),
-    30_000,
+    10_000,
     [],
   );
 }
@@ -115,7 +115,7 @@ export function useDashboardSummaryPolled() {
 export function useRecentViolations(limit = 5) {
   return usePolledApi<ApiResponse<RecentViolation[]>>(
     () => api.get('/api/dashboard/recent', { limit }),
-    30_000,
+    10_000,
     [limit],
   );
 }
