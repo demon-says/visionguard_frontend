@@ -165,10 +165,14 @@ function ActiveAssignments() {
                       <option value="" style={{ background: '#111827', color: '#64748b' }}>— Select a Driver —</option>
                       {allDrivers.map(d => {
                         const score = d.safety_score ?? 0;
-                        let eligible = false;
-                        if (route.difficulty === 'simple') eligible = score >= 30;
-                        else if (route.difficulty === 'moderate') eligible = score >= 60;
-                        else if (route.difficulty === 'demanding') eligible = score >= 85;
+                        // BUS-001 (WEBCAM-01) is a test bus — all drivers eligible
+                        const isTestBus = route.bus_number === 'BUS-001' || (route as any).source_id === 'WEBCAM-01';
+                        let eligible = isTestBus ? true : false;
+                        if (!isTestBus) {
+                          if (route.difficulty === 'simple') eligible = score >= 30;
+                          else if (route.difficulty === 'moderate') eligible = score >= 60;
+                          else if (route.difficulty === 'demanding') eligible = score >= 85;
+                        }
 
                         return (
                           <option
