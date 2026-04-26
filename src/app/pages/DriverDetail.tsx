@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { toast } from 'sonner';
 import { VIOLATION_COLORS, VIOLATION_LABELS, ROUTE_COLORS, ROUTE_LABELS, FINE_AMOUNTS, FINE_THRESHOLD } from '../data/constants';
-import { useDriver, useIssuePenalty } from '../api/hooks';
+import { useDriver, useIssuePenalty, useUpdateDriverStatus } from '../api/hooks';
 
 const safetyColor = (score: number) => {
   if (score >= 80) return '#10b981';
@@ -128,6 +128,7 @@ export default function DriverDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: result, loading, error, refetch } = useDriver(id);
   const { issue: issuePenalty, loading: issuingPenalty } = useIssuePenalty();
+  const { update: updateDriverStatus, loading: updatingStatus } = useUpdateDriverStatus();
 
   // Penalty dialog state
   const [penaltyTarget, setPenaltyTarget] = useState<{
@@ -264,6 +265,29 @@ export default function DriverDetail() {
               >
                 {driver.status.toUpperCase()}
               </span>
+              <button
+                disabled={updatingStatus}
+                onClick={async () => {
+                  const newStatus = driver.status === 'suspended' ? 'active' : 'suspended';
+                  try {
+                    await updateDriverStatus(driver.id, newStatus);
+                    toast.success(`Driver ${newStatus === 'active' ? 'activated' : 'suspended'} successfully`);
+                    refetch();
+                  } catch {
+                    toast.error('Failed to update driver status');
+                  }
+                }}
+                className="px-3 py-1 rounded-full text-xs font-bold transition-all hover:opacity-80"
+                style={{
+                  background: driver.status === 'suspended' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                  color: driver.status === 'suspended' ? '#10b981' : '#ef4444',
+                  border: `1px solid ${driver.status === 'suspended' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  cursor: updatingStatus ? 'wait' : 'pointer',
+                  opacity: updatingStatus ? 0.5 : 1,
+                }}
+              >
+                {updatingStatus ? '...' : driver.status === 'suspended' ? '✓ Activate' : '✕ Suspend'}
+              </button>
               <span
                 className="px-3 py-1 rounded-full text-xs font-bold"
                 style={{ background: `${routeColor}15`, color: routeColor }}
