@@ -439,53 +439,8 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Notifications */}
-      <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <Bell size={18} color="#f59e0b" />
-          <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>Notification Settings</div>
-        </div>
-        <div className="space-y-4">
-          {([
-            { key: 'alert_sound' as const, label: 'Alert Sound', desc: 'Play sound on new violation detection' },
-            { key: 'email_alerts' as const, label: 'Email Alerts', desc: 'Send email for flagged violations' },
-            { key: 'sms_alerts' as const, label: 'SMS Alerts', desc: 'Send SMS for critical events' },
-            { key: 'auto_flag' as const, label: 'Auto-Flag High Severity', desc: 'Automatically flag violations with >90% confidence' },
-          ] as const).map(item => (
-            <div key={item.key} className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-              <div>
-                <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{item.label}</div>
-                <div style={{ color: '#475569', fontSize: 12 }}>{item.desc}</div>
-              </div>
-              <Toggle
-                enabled={!!notifications[item.key]}
-                onToggle={() => setNotifications(n => ({ ...n, [item.key]: !n[item.key] }))}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Camera Settings */}
-      <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <Camera size={18} color="#ec4899" />
-          <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>Camera & Recording</div>
-        </div>
-        <div className="grid md:grid-cols-2 gap-4">
-          {[
-            { label: 'Camera Resolution', value: camera.resolution },
-            { label: 'Frame Rate', value: `${camera.frame_rate} FPS` },
-            { label: 'Recording Retention', value: `${camera.retention_days} days` },
-            { label: 'Capture on Violation', value: camera.capture_on_detection ? 'Enabled' : 'Disabled' },
-          ].map(item => (
-            <div key={item.label} className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
-              <div style={{ color: '#64748b', fontSize: 13 }}>{item.label}</div>
-              <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+
 
       {/* System Info */}
       <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, #0d1528 0%, #111827 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
