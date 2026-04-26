@@ -214,9 +214,11 @@ export default function Routes() {
           <div>
             <div style={{ color: '#a5b4fc', fontWeight: 700, fontSize: 14, marginBottom: 6 }}>AI Route Decision Mechanism</div>
             <div style={{ color: '#64748b', fontSize: 13, lineHeight: 1.6 }}>
-              Vision Guard automatically assigns routes based on each driver's safety score and violation history.
-              Drivers with <span style={{ color: '#10b981', fontWeight: 600 }}>fewer violations (score ≥ 80%)</span> are assigned more <strong style={{ color: '#10b981' }}>demanding routes</strong>,
-              while drivers with <span style={{ color: '#ef4444', fontWeight: 600 }}>higher violations</span> are restricted to <strong style={{ color: '#6b7280' }}>simpler routes</strong> until their record improves.
+              Vision Guard assigns routes based on each driver's safety score.
+              Drivers with <span style={{ color: '#10b981', fontWeight: 600 }}>high scores (≥ 85%)</span> qualify for <strong style={{ color: '#10b981' }}>demanding routes</strong>,
+              drivers with <span style={{ color: '#3b82f6', fontWeight: 600 }}>moderate scores (60–84%)</span> qualify for <strong style={{ color: '#3b82f6' }}>moderate routes</strong>,
+              while drivers with <span style={{ color: '#6b7280', fontWeight: 600 }}>lower scores (30–59%)</span> are restricted to <strong style={{ color: '#6b7280' }}>simple routes</strong>.
+              Drivers below 30% cannot be assigned any route.
             </div>
             <div className="flex flex-wrap gap-3 mt-3">
               {(Object.entries(difficultyConfig) as [RouteType, any][]).map(([key, cfg]) => (
@@ -225,7 +227,7 @@ export default function Routes() {
                   <span style={{ color: cfg.color, fontSize: 12, fontWeight: 600 }}>{ROUTE_LABELS[key]}</span>
                   <span style={{ color: '#64748b', fontSize: 12 }}>—</span>
                   <span style={{ color: '#64748b', fontSize: 12 }}>
-                    {key === 'demanding' ? 'Score ≥ 80%' : key === 'moderate' ? 'Score 50–79%' : 'Score < 50%'}
+                    {key === 'demanding' ? 'Score ≥ 85%' : key === 'moderate' ? 'Score 60–84%' : 'Score 30–59%'}
                   </span>
                 </div>
               ))}

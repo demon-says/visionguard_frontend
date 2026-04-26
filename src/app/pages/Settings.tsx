@@ -163,11 +163,24 @@ function ActiveAssignments() {
                       }}
                     >
                       <option value="" style={{ background: '#111827', color: '#64748b' }}>— Select a Driver —</option>
-                      {allDrivers.map(d => (
-                        <option key={d.id} value={d.id} style={{ background: '#111827', color: '#f1f5f9' }}>
-                          {d.name} (Score: {d.safety_score} · #{d.rank})
-                        </option>
-                      ))}
+                      {allDrivers.map(d => {
+                        const score = d.safety_score ?? 0;
+                        let eligible = false;
+                        if (route.difficulty === 'simple') eligible = score >= 30;
+                        else if (route.difficulty === 'moderate') eligible = score >= 60;
+                        else if (route.difficulty === 'demanding') eligible = score >= 85;
+
+                        return (
+                          <option
+                            key={d.id}
+                            value={d.id}
+                            disabled={!eligible}
+                            style={{ background: '#111827', color: eligible ? '#f1f5f9' : '#475569' }}
+                          >
+                            {d.name} (Score: {score} · #{d.rank}){!eligible ? ' — Ineligible' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                     {/* Dropdown arrow / spinner */}
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
