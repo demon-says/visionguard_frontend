@@ -420,7 +420,7 @@ export default function DriverDetail() {
               {[
                 { icon: Hash, label: 'License Number', value: driver.license_number },
                 { icon: Calendar, label: 'Join Date', value: driver.join_date ? new Date(driver.join_date).toLocaleDateString() : '–' },
-                { icon: Clock, label: 'Last Active', value: driver.last_active ? new Date(driver.last_active).toLocaleString() : '–' },
+                { icon: Clock, label: driver.status === 'suspended' ? 'Suspended Since' : 'Status', value: driver.status === 'suspended' && driver.last_active ? new Date(driver.last_active).toLocaleDateString() : driver.status === 'suspended' ? 'Suspended' : 'Active' },
                 { icon: TrendingUp, label: 'Experience', value: `${driver.experience_years || 0} years` },
                 { icon: Award, label: 'Ranking', value: `#${driver.rank} globally` },
               ].map(({ icon: Icon, label, value }) => (
