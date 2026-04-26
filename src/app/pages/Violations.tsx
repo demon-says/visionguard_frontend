@@ -142,7 +142,7 @@ export default function Violations() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [penaltyFilter, setPenaltyFilter] = useState<string>('all');
+
   const [page, setPage] = useState(1);
   const limit = 20;
 
@@ -155,10 +155,9 @@ export default function Violations() {
     type: filterType !== 'all' ? filterType : undefined,
     status: filterStatus !== 'all' ? filterStatus : undefined,
     driverName: search || undefined,
-    penaltyFilter: penaltyFilter !== 'all' ? penaltyFilter : undefined,
     page,
     limit,
-  }), [filterType, filterStatus, search, penaltyFilter, page, limit]);
+  }), [filterType, filterStatus, search, page, limit]);
 
   const { data: result, loading, refetch } = useViolations(filters);
   const { update: updateViolation, loading: updating } = useUpdateViolation();
@@ -308,28 +307,7 @@ export default function Violations() {
             })}
           </div>
 
-          {/* Penalty filter */}
-          <div className="flex gap-1">
-            {[
-              { key: 'all', label: 'All Penalties' },
-              { key: 'fined', label: 'Fined' },
-              { key: 'warning', label: 'Warning' },
-              { key: 'none', label: 'No Penalty' },
-            ].map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => { setPenaltyFilter(key); setPage(1); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                style={{
-                  background: penaltyFilter === key ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.04)',
-                  color: penaltyFilter === key ? '#f59e0b' : '#64748b',
-                  border: penaltyFilter === key ? '1px solid rgba(245,158,11,0.4)' : '1px solid transparent',
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+
 
           <div style={{ color: '#475569', fontSize: 12 }}>
             Showing {violations.length} of {totalCount}
