@@ -490,23 +490,6 @@ export default function DriverDetail() {
                             >
                               {v.status}
                             </span>
-                            {/* Issue Penalty button */}
-                            <button
-                              onClick={() => setPenaltyTarget({
-                                id: v.id,
-                                driver_name: driver.name,
-                                violation_type: v.violation_type,
-                              })}
-                              disabled={hasPenalty}
-                              className="w-6 h-6 rounded flex items-center justify-center transition-all hover:opacity-80 disabled:opacity-30"
-                              style={{
-                                background: hasPenalty ? 'rgba(255,255,255,0.03)' : 'rgba(245,158,11,0.1)',
-                                color: hasPenalty ? '#475569' : '#f59e0b',
-                              }}
-                              title={hasPenalty ? 'Penalty already issued' : 'Issue Penalty'}
-                            >
-                              <Gavel size={10} />
-                            </button>
                           </div>
                         </div>
                         <div style={{ color: '#64748b', fontSize: 11 }}>{v.detection_date} at {v.start_time}</div>
